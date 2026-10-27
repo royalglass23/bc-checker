@@ -11,7 +11,7 @@ Separate ServiceM8 Web Service Hosted Add-on for an Auckland-first, staff-manage
 - Re-adding a stopped Job starts a fresh baseline and clears that Job's old candidates. An already active Job is left unchanged.
 - Address matching must be unique. An uncertain address or changed ServiceM8 Job address produces a visible check error; it does not attach another property's events.
 - No email is sent. No ServiceM8 Job or Diary data is written.
-- The Add-ons menu launches BC Checker in ServiceM8's own add-on canvas. The signed staff session travels in the add-on's forms, including pagination and review actions; it does not require a separate browser tab or a third-party cookie.
+- The Add-ons menu renders BC Checker directly in ServiceM8's add-on canvas. The signed staff session travels in the add-on's forms, including pagination and review actions; it does not require a separate browser tab or a third-party cookie.
 
 The Homes timeline labels these as consent events. The add-on presents them as **candidates**, and staff confirm whether one is the right building consent for the ServiceM8 Job. A matching address alone does not establish that conclusion.
 
