@@ -84,31 +84,6 @@ export function classifyEvent(event, existing, isFirstCheck) {
   return 'needs_review';
 }
 
-function csvCells(line) {
-  const cells = [];
-  let current = '';
-  let quoted = false;
-  for (let i = 0; i < line.length; i++) {
-    const char = line[i];
-    if (char === '"' && quoted && line[i + 1] === '"') { current += '"'; i++; }
-    else if (char === '"') quoted = !quoted;
-    else if (char === ',' && !quoted) { cells.push(current.trim()); current = ''; }
-    else current += char;
-  }
-  cells.push(current.trim());
-  return cells;
-}
-
-export function parseJobNumbers(raw) {
-  const lines = String(raw).replace(/^\uFEFF/, '').split(/\r?\n/).filter(Boolean);
-  if (lines.length === 0) return [];
-  const rows = lines.map(csvCells);
-  const headerIndex = rows[0].findIndex(cell => /^(?:job\s*(?:number|no|id)|generated_job_id)$/i.test(cell));
-  const index = headerIndex >= 0 ? headerIndex : 0;
-  const data = headerIndex >= 0 ? rows.slice(1) : rows;
-  return [...new Set(data.map(row => row[index] ?? '').filter(number => /^[A-Za-z0-9-]{1,30}$/.test(number)))];
-}
-
 export function jobPage(rawSize, rawPage, total) {
   const size = [5, 10, 20, 50].includes(Number(rawSize)) ? Number(rawSize) : 5;
   const pages = Math.max(1, Math.ceil(total / size));

@@ -4,7 +4,7 @@ Separate ServiceM8 Web Service Hosted Add-on for an Auckland-first, staff-manage
 
 ## First-version behaviour
 
-- Add up to 50 ServiceM8 job numbers at a time by pasting numbers or loading a CSV. A `Job Number`, `Job ID`, or `generated_job_id` header can be in any column; without a header, the first column is used. Duplicates are ignored. A signed-in ServiceM8 staff member adds and reviews jobs.
+- Add one ServiceM8 job number at a time. A signed-in ServiceM8 staff member adds and reviews jobs.
 - On the first check, record all consent events already present at the exact matched address as a **baseline**. Do not raise a new-candidate flag for those events.
 - On later checks, identify consents by number (or a fallback event fingerprint when no number exists). A new event is marked **Needs review** once. An existing baseline application also moves to review when its status first appears as issued, approved, or granted.
 - **Wrong BC** remembers the dismissal for that Job and consent number. Further observations of that number do not reopen it. **Right BC — stop checking** retains the decision and stops monitoring the Job. Staff may also stop a Job without confirming a BC.
@@ -37,5 +37,5 @@ The user stated that Royal Glass has written permission from Homes.co.nz coverin
 
 ## Local verification
 
-Run `npm test` for matching, CSV parsing, and candidate state rules. `node --check src/*.mjs` can be run on each file for syntax. Live ServiceM8 OAuth, embedded signed menu launch and navigation, Homes data shape, scheduler timing, and database behaviour require staging verification with separate credentials and representative Jobs. No migration or outbound call was made in this local build.
+Run `npm test` for matching and candidate state rules. `node --check src/*.mjs` can be run on each file for syntax. Live ServiceM8 OAuth, embedded signed menu launch and navigation, Homes data shape, scheduler timing, and database behaviour require staging verification with separate credentials and representative Jobs. No migration or outbound call was made in this local build.
 # bc-checker

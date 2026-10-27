@@ -55,9 +55,14 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /<th scope="col">Job number<\/th><th scope="col">Client<\/th><th scope="col">Address<\/th>/);
     assert.match(html, /<tbody><tr><th scope="row">R123<\/th>/);
     assert.match(html, /<tbody><tr><th scope="row">R123<\/th><td class="client-cell">Example Client<\/td><td class="address-cell">1 Example Street<\/td>/);
+    assert.match(html, /class="check-job-form" data-job-number="R123"/);
     assert.match(html, /class="icon-button check" type="submit" aria-label="Check now Job R123"/);
+    assert.match(html, /id="checkJobLoading" class="job-dialog"/);
     assert.match(html, /class="icon-button stop" type="submit" aria-label="Stop monitoring Job R123"/);
-    assert.match(html, /Add Job Numbers/);
+    assert.match(html, /<label for="jobNumber">Job number<\/label>/);
+    assert.match(html, /name="jobNumber" type="text"/);
+    assert.match(html, /Add Job/);
+    assert.doesNotMatch(html, /jobFile|xlsx\.js|CSV or XLSX/);
     assert.match(html, /id="jobSearch"/);
     assert.match(html, /Consent candidates for Job R123/);
     assert.match(html, /BC123/);
@@ -75,16 +80,41 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     try {
       const add = await fetch(`${base}/jobs`, { method: 'POST',
         headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ session, csrf, jobNumbers: '!' }),
+        body: new URLSearchParams({ session, csrf, jobNumber: 'R123\nR124' }),
       });
-      assert.equal(add.status, 500);
-      assert.equal(errors.at(-1)?.[1]?.error, 'Enter 1–50 valid job numbers');
+      assert.equal(add.status, 200);
+      assert.equal(errors.at(-1)?.[1]?.error, 'Enter one valid job number');
+      const addHtml = await add.text();
+      assert.match(addHtml, /id="addJobsResult" class="job-dialog error"/);
+      assert.match(addHtml, /Job not added/);
+      assert.match(addHtml, /Enter one valid job number/);
+      assert.match(addHtml, /id="addJobsLoading" class="job-dialog"/);
     } finally { console.error = originalError; }
     const view = await fetch(`${base}/view`, { method: 'POST',
       body: new URLSearchParams({ session }),
     });
     assert.equal(view.status, 200);
     assert.match(await view.text(), /<h1>BC Checker<\/h1>/);
+    for (const [kind, heading] of [['success', 'Job added'], ['error', 'Job not added']]) {
+      const resultView = await fetch(`${base}/view`, { method: 'POST',
+        body: new URLSearchParams({ session, addResult: '1 job added.', addKind: kind }),
+      });
+      assert.equal(resultView.status, 200);
+      const resultHtml = await resultView.text();
+      assert.match(resultHtml, new RegExp(heading));
+      assert.match(resultHtml, /id="addJobsResult"/);
+      assert.match(resultHtml, /1 job added\./);
+    }
+    for (const [kind, heading] of [['success', 'Job checked'], ['error', 'Job check not completed']]) {
+      const resultView = await fetch(`${base}/view`, { method: 'POST',
+        body: new URLSearchParams({ session, checkResult: 'Address checked.', checkKind: kind }),
+      });
+      assert.equal(resultView.status, 200);
+      const resultHtml = await resultView.text();
+      assert.match(resultHtml, new RegExp(heading));
+      assert.match(resultHtml, /id="checkJobResult"/);
+      assert.match(resultHtml, /Address checked\./);
+    }
     const filtered = await fetch(`${base}/view`, { method: 'POST',
       body: new URLSearchParams({ session, search: 'Exam', page: '1' }),
     });

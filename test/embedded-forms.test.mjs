@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import http from 'node:http';
 import { test } from 'node:test';
 import { SignJWT } from 'jose';
+import pg from 'pg';
 import { requestListener } from '../src/server.mjs';
 
 test('embedded forms reach their validation and still require a valid CSRF token', async () => {
@@ -31,18 +32,29 @@ test('embedded forms reach their validation and still require a valid CSRF token
   const originalError = console.error;
   const errors = [];
   console.error = (...args) => errors.push(args);
+  const originalQuery = pg.Pool.prototype.query;
+  pg.Pool.prototype.query = async function (sql) {
+    if (sql.includes('count(*)::int')) return { rows: [{ total: 0 }] };
+    if (sql.includes('FROM monitored_jobs') || sql.includes('FROM consent_candidates')) return { rows: [] };
+    throw new Error(`Unexpected query: ${sql}`);
+  };
   try {
     const submit = async (origin, form) => {
       const response = await fetch(`${base}/jobs`, { method: 'POST',
         headers: { Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ session, jobNumbers: '!', ...form }),
+        body: new URLSearchParams({ session, jobNumber: '!', ...form }),
       });
-      assert.equal(response.status, 500);
-      return errors.pop()?.[1]?.error;
+      return response;
     };
-    assert.equal(await submit('null', { csrf }), 'Enter 1–50 valid job numbers');
-    assert.equal(await submit('https://go.servicem8.com', { csrf }), 'Enter 1–50 valid job numbers');
-    assert.equal(await submit('null', { csrf: 'forged' }), 'Invalid form token');
+    for (const origin of ['null', 'https://go.servicem8.com']) {
+      const response = await submit(origin, { csrf });
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /Enter one valid job number/);
+      assert.equal(errors.pop()?.[1]?.error, 'Enter one valid job number');
+    }
+    const forged = await submit('null', { csrf: 'forged' });
+    assert.equal(forged.status, 500);
+    assert.equal(errors.pop()?.[1]?.error, 'Invalid form token');
 
     const manual = await fetch(`${base}/jobs/33333333-3333-4333-8333-333333333333/check`, {
       method: 'POST', headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -51,12 +63,23 @@ test('embedded forms reach their validation and still require a valid CSRF token
     assert.equal(manual.status, 500);
     assert.equal(errors.pop()?.[1]?.error, 'Invalid form token');
 
+    const missingJob = await fetch(`${base}/jobs/33333333-3333-4333-8333-333333333333/check`, {
+      method: 'POST', headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ session, csrf }),
+    });
+    assert.equal(missingJob.status, 200);
+    const missingJobHtml = await missingJob.text();
+    assert.match(missingJobHtml, /id="checkJobResult" class="job-dialog error"/);
+    assert.match(missingJobHtml, /Monitored job is no longer active/);
+    assert.equal(errors.pop()?.[1]?.error, 'Monitored job is no longer active');
+
     const view = await fetch(`${base}/view`, { method: 'POST',
       headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ session: 'invalid' }),
     });
     assert.equal(view.status, 401);
   } finally {
+    pg.Pool.prototype.query = originalQuery;
     console.error = originalError;
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
