@@ -5,8 +5,8 @@
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {
-    "start": "node src/server.mjs",
-    "db:migrate": "node db/migrate.mjs",
+    "start": "node --env-file-if-exists=.env server.ts",
+    "db:migrate": "node --env-file-if-exists=.env db/migrate.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

@@ -1,6 +1,6 @@
-import http from 'node:http';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import manifest from '../manifest.json' with { type: 'json' };
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.mjs';
 import { database } from './db.mjs';
@@ -98,13 +98,6 @@ async function verifyEvent(token) {
   if (used.rowCount !== 1) throw new Error('Launch was already used');
   return { accountUUID: String(payload.auth.accountUUID).toLowerCase(),
     staffUUID: String(payload.auth.staffUUID).toLowerCase() };
-}
-
-function manifest() {
-  return { $schema: 'https://api.servicem8.com/api_1.0/addonsdk/manifest-schema/v1.json',
-    name: 'RG BC Checker', version: '0.1.0', oauth: { scope: 'vendor read_jobs' }, actions: [],
-    menuItems: [{ name: 'RG BC Checker', type: 'addon', iconURL: `${cfg.baseUrl}/icon.svg`,
-      event: 'rg_bc_checker_menu' }] };
 }
 
 function page(title, body) {
@@ -245,7 +238,7 @@ async function handle(req, res) {
   const url = new URL(req.url, cfg.baseUrl);
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return respond(res, 200, 'ok', 'text/plain');
-  if (req.method === 'GET' && path === '/manifest.json') return respond(res, 200, JSON.stringify(manifest()), 'application/json');
+  if (req.method === 'GET' && path === '/manifest.json') return respond(res, 200, JSON.stringify(manifest), 'application/json');
   if (req.method === 'GET' && path === '/style.css') return respond(res, 200, await readFile(new URL('./style.css', import.meta.url)), 'text/css');
   if (req.method === 'GET' && path === '/app.js') return respond(res, 200, await readFile(new URL('./app.js', import.meta.url)), 'text/javascript');
   if (req.method === 'GET' && path === '/icon.svg') return respond(res, 200, await readFile(new URL('./icon.svg', import.meta.url)), 'image/svg+xml');
@@ -302,11 +295,10 @@ async function handle(req, res) {
   respond(res, 404, 'Not found', 'text/plain');
 }
 
-const server = http.createServer((req, res) => {
+export const requestListener = (req, res) => {
   handle(req, res).catch(error => {
     console.error('BC Checker request failed', { path: req.url, error: error instanceof Error ? error.message : 'Unknown error' });
     if (!res.headersSent) respond(res, 500, 'BC Checker could not complete the request. Please try again.', 'text/plain');
     else res.end();
   });
-});
-server.listen(cfg.port, () => console.log(`BC Checker listening on ${cfg.port}`));
+};
