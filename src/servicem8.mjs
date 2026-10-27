@@ -4,6 +4,7 @@ import { database, seal, unseal } from './db.mjs';
 const api = 'https://api.servicem8.com/api_1.0';
 const tokenUrl = 'https://go.servicem8.com/oauth/access_token';
 export const scopes = 'vendor read_jobs publish_job_notes publish_diary_items';
+const readScopes = ['vendor', 'read_jobs'];
 
 export function oauthAuthorizeUrl(cfg, state) {
   const url = new URL('https://go.servicem8.com/oauth/authorize');
@@ -35,7 +36,7 @@ async function tokenRequest(cfg, body) {
     throw new Error('ServiceM8 OAuth response is incomplete');
   }
   const granted = new Set(String(data.scope ?? '').split(/\s+/));
-  if (scopes.split(' ').some(scope => !granted.has(scope))) throw new Error('ServiceM8 permissions are incomplete');
+  if (readScopes.some(scope => !granted.has(scope))) throw new Error('ServiceM8 permissions are incomplete');
   return { access: data.access_token, refresh: data.refresh_token,
     expires: new Date(Date.now() + Number(data.expires_in) * 1000), scope: data.scope };
 }

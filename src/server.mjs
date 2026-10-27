@@ -133,7 +133,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     ORDER BY c.first_seen_at DESC`, [identity.accountUUID, jobs.rows.map(job => job.id)]);
   const byJob = Map.groupBy(candidates.rows, row => row.monitored_job_id);
   const csrf = csrfFor(identity);
-  const cards = jobs.rows.map(job => {
+  const jobViews = jobs.rows.map(job => {
     const rows = byJob.get(job.id) ?? [];
     const review = rows.filter(row => row.decision === 'needs_review').length;
     const renderCandidate = row => `<li class="candidate ${escape(row.decision)}">
@@ -145,20 +145,20 @@ async function renderDashboard(identity, session, query, message, embedded = fal
         ? actionForm(`/candidates/${row.id}/reopen`, 'Reopen for review', csrf, session, origin)
         : `${actionForm(`/candidates/${row.id}/ignore`, 'Wrong BC', csrf, session, origin)}
            ${actionForm(`/candidates/${row.id}/confirm`, 'Right BC — stop checking', csrf, session, origin)}`}</div></li>`;
-    const events = rows.filter(row => row.decision !== 'ignored').map(renderCandidate).join('');
-    const ignored = rows.filter(row => row.decision === 'ignored').map(renderCandidate).join('');
-    return `<article class="job"><div class="job-row"><div class="job-identity"><h3>Job ${escape(job.job_number)}</h3><span>${escape(job.job_address)}</span></div>
-      <span class="pill ${review ? 'attention' : ''}">${review ? `${review} to review` : job.baseline_complete ? 'Monitoring' : 'Waiting for first check'}</span>
-      <div class="job-controls">${actionForm(`/jobs/${job.id}/check`, 'Check this address now', csrf, session, origin)}</div>
-      <details class="job-details"><summary>Details</summary><div class="job-details-body">
-      ${job.job_description ? `<p class="description">${escape(job.job_description.slice(0, 350))}</p>` : ''}
-      <p class="meta">Last checked: ${job.last_checked_at ? escape(new Date(job.last_checked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })) : 'Never'}
-      ${job.last_error ? `<br><span class="error">Check failed: ${escape(job.last_error)}</span>` : ''}</p>
-      ${events ? `<ul>${events}</ul>` : `<p class="empty">No consent candidates recorded yet.</p>`}
-      ${ignored ? `<details><summary>${rows.filter(row => row.decision === 'ignored').length} dismissed candidate(s)</summary><ul>${ignored}</ul></details>` : ''}
-      <details><summary>Stop monitoring this job</summary>${actionForm(`/jobs/${job.id}/stop`, 'Remove from monitoring', csrf, session, origin)}</details>
-      </div></details></div></article>`;
-  }).join('');
+    const status = review ? `${review} to review` : job.baseline_complete ? 'Monitoring' : 'Waiting for first check';
+    const lastChecked = job.last_checked_at
+      ? escape(new Date(job.last_checked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })) : 'Never';
+    return {
+      row: `<tr><th scope="row">${escape(job.job_number)}</th><td class="address-cell">${escape(job.job_address)}</td>
+        <td>${lastChecked}${job.last_error ? `<span class="error">Check failed: ${escape(job.last_error)}</span>` : ''}</td>
+        <td><span class="pill ${review ? 'attention' : ''}">${status}</span></td>
+        <td>${actionForm(`/jobs/${job.id}/check`, 'Check now', csrf, session, origin)}</td>
+        <td>${actionForm(`/jobs/${job.id}/stop`, 'Stop monitoring', csrf, session, origin)}</td></tr>`,
+      candidates: rows.length ? `<section class="candidate-panel" aria-label="Consent candidates for Job ${escape(job.job_number)}">
+        <h3>Consent candidates for Job ${escape(job.job_number)}</h3>
+        <ul>${rows.map(renderCandidate).join('')}</ul></section>` : '',
+    };
+  });
   const flash = message ?? query.get('message');
   const pageControl = (number, label, rel) => session
     ? `<form method="post" action="${escape(origin)}/view"><input type="hidden" name="session" value="${escape(session)}"><input type="hidden" name="page" value="${number}"><input type="hidden" name="size" value="${pageSize}"><button type="submit">${label}</button></form>`
@@ -174,7 +174,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     <p id="fileStatus" class="hint" role="status" aria-live="polite"></p>
     <button id="addJobsButton" type="submit">Add to monitoring</button></form></section>
     <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${total} active ${total === 1 ? 'job' : 'jobs'}</p></div></div>
-    ${cards || '<p class="empty">No jobs are being monitored. Add a job number to start.</p>'}
+    ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check now</th><th scope="col">Stop monitoring</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : '<p class="empty">No jobs are being monitored. Add a job number to start.</p>'}
     ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div>
     <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>`, true, embedded);
 }
