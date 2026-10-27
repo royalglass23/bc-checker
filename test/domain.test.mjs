@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyEvent, consentIdentity, isIssued, jobPage, latestConsentEvents, parseJobNumbers, selectExactProperty } from '../src/domain.mjs';
+import { classifyEvent, consentEvents, consentIdentity, isIssued, jobPage, latestConsentEvents, parseJobNumbers, selectExactProperty } from '../src/domain.mjs';
 
 test('CSV and pasted job numbers are deduplicated', () => {
   assert.deepEqual(parseJobNumbers('Job Number,Address\nR123,12 Main St\nR123\nR124'), ['R123', 'R124']);
@@ -46,4 +46,12 @@ test('newest status wins when a timeline includes several events for one BC', ()
   const newer = { ...older, date: '2026-10-20', action: 'issued' };
   assert.deepEqual(latestConsentEvents([newer, older]), [newer]);
   assert.deepEqual(latestConsentEvents([older, newer]), [newer]);
+});
+
+test('timeline consent categories remain available for BC classification', () => {
+  const events = consentEvents({ events: [
+    { key: 'building_consent', date: '2026-01-01', data: { consent_number: '12345' } },
+    { key: 'resource_consent', date: '2026-01-02', data: { consent_number: 'RC123' } },
+  ] });
+  assert.deepEqual(events.map(event => event.kind), ['building_consent', 'resource_consent']);
 });

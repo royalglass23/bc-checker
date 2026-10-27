@@ -2,6 +2,28 @@ const file = document.querySelector('#jobFile');
 const textarea = document.querySelector('#jobNumbers');
 const status = document.querySelector('#fileStatus');
 const submit = document.querySelector('#addJobsButton');
+const addForm = submit?.closest('form');
+const addStatus = document.querySelector('#addJobsStatus');
+
+addForm?.addEventListener('submit', event => {
+  if (!addForm.reportValidity()) { event.preventDefault(); return; }
+  submit.disabled = true;
+  submit.textContent = 'Adding…';
+  if (addStatus) addStatus.textContent = 'Adding job numbers. This may take a moment.';
+});
+
+const searchForm = document.querySelector('#jobSearchForm');
+const searchInput = document.querySelector('#jobSearch');
+let searchTimer;
+searchInput?.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const length = searchInput.value.trim().length;
+  if (length >= 3 || length === 0) searchTimer = setTimeout(() => searchForm.requestSubmit(), 500);
+});
+document.querySelector('#clearSearch')?.addEventListener('click', () => {
+  searchInput.value = '';
+  searchForm.requestSubmit();
+});
 
 if (file && textarea && status && submit) file.addEventListener('change', async () => {
   const selected = file.files?.[0];

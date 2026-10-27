@@ -1,13 +1,14 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { mergeBcStatus } from './bc-note.mjs';
 import manifest from '../public/manifest.json' with { type: 'json' };
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.mjs';
 import { database } from './db.mjs';
 import { checkOne, runDueChecks } from './checker.mjs';
 import { jobPage, parseJobNumbers } from './domain.mjs';
-import { accessToken, addDiaryItem, addJobNote, consumeOAuthState, createOAuthState, exchangeCode,
-  getJobByNumber, oauthAuthorizeUrl, saveConnection, vendorUUID } from './servicem8.mjs';
+import { accessToken, addDiaryItem, consumeOAuthState, createOAuthState, exchangeCode,
+  getClientName, getJobByNumber, oauthAuthorizeUrl, saveConnection, updateJobNoteField, vendorUUID } from './servicem8.mjs';
 
 let cfg;
 let db;
@@ -120,14 +121,19 @@ function actionForm(path, label, csrf, session = '', origin = '') {
 
 async function renderDashboard(identity, session, query, message, embedded = false) {
   const origin = embedded ? cfg.baseUrl : '';
-  const count = await db.query('SELECT count(*)::int AS total FROM monitored_jobs WHERE account_uuid=$1 AND status=$2',
-    [identity.accountUUID, 'active']);
+  const search = String(query.get('search') ?? '').trim().slice(0, 100);
+  const term = search.length >= 3 ? search : '';
+  const filter = `account_uuid=$1 AND status=$2 AND ($3='' OR
+    strpos(lower(job_number), lower($3)) > 0 OR strpos(lower(job_address), lower($3)) > 0 OR
+    strpos(lower(client_name), lower($3)) > 0)`;
+  const count = await db.query(`SELECT count(*)::int AS total FROM monitored_jobs WHERE ${filter}`,
+    [identity.accountUUID, 'active', term]);
   const total = count.rows[0].total;
   const { size: pageSize, pages: pageCount, page: currentPage, offset } = jobPage(
     query.get('size'), query.get('page'), total);
-  const jobs = await db.query(`SELECT * FROM monitored_jobs WHERE account_uuid=$1 AND status=$2
-    ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4`,
-    [identity.accountUUID, 'active', pageSize, offset]);
+  const jobs = await db.query(`SELECT * FROM monitored_jobs WHERE ${filter}
+    ORDER BY created_at DESC, id DESC LIMIT $4 OFFSET $5`,
+    [identity.accountUUID, 'active', term, pageSize, offset]);
   const candidates = await db.query(`SELECT c.* FROM consent_candidates c JOIN monitored_jobs j ON j.id=c.monitored_job_id
     WHERE j.account_uuid=$1 AND j.status='active' AND j.id=ANY($2::uuid[])
     ORDER BY c.first_seen_at DESC`, [identity.accountUUID, jobs.rows.map(job => job.id)]);
@@ -149,7 +155,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     const lastChecked = job.last_checked_at
       ? escape(new Date(job.last_checked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })) : 'Never';
     return {
-      row: `<tr><th scope="row">${escape(job.job_number)}</th><td class="address-cell">${escape(job.job_address)}</td>
+      row: `<tr><th scope="row">${escape(job.job_number)}</th><td class="address-cell">${escape(job.job_address)}</td><td>${escape(job.client_name || '—')}</td>
         <td>${lastChecked}${job.last_error ? `<span class="error">Check failed: ${escape(job.last_error)}</span>` : ''}</td>
         <td><span class="pill ${review ? 'attention' : ''}">${status}</span></td>
         <td>${actionForm(`/jobs/${job.id}/check`, 'Check now', csrf, session, origin)}</td>
@@ -161,22 +167,25 @@ async function renderDashboard(identity, session, query, message, embedded = fal
   });
   const flash = message ?? query.get('message');
   const pageControl = (number, label, rel) => session
-    ? `<form method="post" action="${escape(origin)}/view"><input type="hidden" name="session" value="${escape(session)}"><input type="hidden" name="page" value="${number}"><input type="hidden" name="size" value="${pageSize}"><button type="submit">${label}</button></form>`
-    : `<a href="/?page=${number}&amp;size=${pageSize}" rel="${rel}">${label}</a>`;
+    ? `<form method="post" action="${escape(origin)}/view"><input type="hidden" name="session" value="${escape(session)}"><input type="hidden" name="search" value="${escape(term)}"><input type="hidden" name="page" value="${number}"><input type="hidden" name="size" value="${pageSize}"><button type="submit">${label}</button></form>`
+    : `<a href="/?page=${number}&amp;size=${pageSize}&amp;search=${encodeURIComponent(term)}" rel="${rel}">${label}</a>`;
   return page('Monitored jobs', `<header><p class="eyebrow">Royal Glass · ServiceM8 add-on</p><h1>BC Checker</h1>
     <p>Track Auckland jobs every 14 days. Existing consents form a baseline; only newly seen candidates need review.</p>${session ? '<p>Use the surrounding ServiceM8 navigation to leave BC Checker.</p>' : ''}</header>
     ${flash ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
     <section class="add"><h2>Add jobs to monitor</h2><p>Enter job numbers or upload a CSV or XLSX export. Files can include a Job Number or Generated_Job_ID column.</p>
     <form method="post" action="${escape(origin)}/jobs"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}
-    <label for="jobNumbers">Job numbers</label><textarea id="jobNumbers" name="jobNumbers" rows="3" maxlength="20000" placeholder="One job number per line" required></textarea>
-    <label for="jobFile">Or upload a list</label><input id="jobFile" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-describedby="fileHelp">
-    <p id="fileHelp" class="hint">CSV or XLSX · first worksheet · up to 50 jobs at a time</p>
-    <p id="fileStatus" class="hint" role="status" aria-live="polite"></p>
-    <button id="addJobsButton" type="submit">Add to monitoring</button></form></section>
-    <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${total} active ${total === 1 ? 'job' : 'jobs'}</p></div></div>
-    ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check now</th><th scope="col">Stop monitoring</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : '<p class="empty">No jobs are being monitored. Add a job number to start.</p>'}
+    <div class="add-fields">
+      <div class="add-field"><label for="jobNumbers">Job numbers</label><textarea id="jobNumbers" name="jobNumbers" rows="3" maxlength="20000" placeholder="e.g. R123 (one job number per line)" required></textarea></div>
+      <div class="add-field"><label for="jobFile">Or upload a list</label><input id="jobFile" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-describedby="fileHelp">
+      <p id="fileHelp" class="hint">CSV or XLSX · first worksheet · up to 50 jobs at a time</p>
+      <p id="fileStatus" class="hint" role="status" aria-live="polite"></p></div>
+    </div>
+    <button id="addJobsButton" type="submit">Add Job Numbers</button><span id="addJobsStatus" class="submit-status" role="status" aria-live="polite"></span></form></section>
+    <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${term ? `${total} matching` : `${total} active`} ${total === 1 ? 'job' : 'jobs'}</p></div>
+    <form id="jobSearchForm" class="job-search" method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}">${hiddenSession(session)}<input type="hidden" name="size" value="${pageSize}"><label for="jobSearch">Search jobs</label><input id="jobSearch" name="search" type="search" minlength="3" maxlength="100" value="${escape(search)}" placeholder="Job number, address or client" autocomplete="off"${term ? ' autofocus' : ''}><button type="submit">Search</button>${term ? '<button id="clearSearch" type="button">Clear</button>' : ''}</form></div>
+    ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Address</th><th scope="col">Client</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check now</th><th scope="col">Stop monitoring</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : `<p class="empty">${term ? `No monitored jobs match “${escape(term)}”.` : 'No jobs are being monitored. Add a job number to start.'}</p>`}
     ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div>
-    <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>`, true, embedded);
+    <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<input type="hidden" name="search" value="${escape(term)}"><label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>`, true, embedded);
 }
 
 async function dashboard(req, res, params, message) {
@@ -203,19 +212,20 @@ async function addJobs(req, res) {
     try {
       const job = await getJobByNumber(token, number);
       if (!uuid.test(job.uuid) || !job.job_address?.trim()) throw new Error('Job has no usable address');
+      const clientName = await getClientName(token, job.company_uuid);
       const client = await db.connect();
       try {
         await client.query('BEGIN');
         const result = await client.query(`INSERT INTO monitored_jobs
-          (id, account_uuid, job_uuid, job_number, job_address, job_description, added_by_staff_uuid)
-          VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (account_uuid, job_uuid) DO UPDATE SET
+          (id, account_uuid, job_uuid, job_number, job_address, client_name, job_description, added_by_staff_uuid)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (account_uuid, job_uuid) DO UPDATE SET
           job_number=excluded.job_number, job_address=excluded.job_address,
-          job_description=excluded.job_description, status='active', baseline_complete=false,
+          client_name=excluded.client_name, job_description=excluded.job_description, status='active', baseline_complete=false,
           last_checked_at=NULL, next_check_at=now(), last_error=NULL,
           added_by_staff_uuid=excluded.added_by_staff_uuid,
           stopped_by_staff_uuid=NULL, stopped_at=NULL
           WHERE monitored_jobs.status='stopped' RETURNING id`,
-        [randomUUID(), identity.accountUUID, job.uuid, number, job.job_address,
+        [randomUUID(), identity.accountUUID, job.uuid, number, job.job_address, clientName,
           String(job.job_description ?? '').slice(0, 2000), identity.staffUUID]);
         if (result.rowCount) {
           await client.query('DELETE FROM consent_candidates WHERE monitored_job_id=$1', [result.rows[0].id]);
@@ -280,8 +290,8 @@ async function checkJobNow(req, res, jobId) {
   if (!job) throw new Error('Monitored job is no longer active');
   const connection = await db.query('SELECT scope FROM oauth_connections WHERE account_uuid=$1', [identity.accountUUID]);
   const granted = new Set(String(connection.rows[0]?.scope ?? '').split(/\s+/));
-  if (!granted.has('publish_job_notes') || !granted.has('publish_diary_items')) {
-    const message = 'Reconnect BC Checker in ServiceM8 to enable Job Note and Diary updates.';
+  if (!granted.has('manage_jobs') || !granted.has('publish_diary_items')) {
+    const message = 'Reconnect BC Checker in ServiceM8 to enable Job Note field and Diary updates.';
     if (params.has('session')) return dashboard(req, res, params, message);
     return redirect(res, `/?message=${encodeURIComponent(message)}`);
   }
@@ -303,14 +313,14 @@ async function checkJobNow(req, res, jobId) {
           let noteSaved = false;
           try {
             const token = await accessToken(cfg, identity.accountUUID);
-            await addJobNote(token, job.job_uuid, content);
+            await updateJobNoteField(token, job.job_uuid, current => mergeBcStatus(current, outcome.noteStatus));
             noteSaved = true;
             await addDiaryItem(token, job.job_uuid, content);
-            message = `Address checked. ${outcome.events} consent event(s) found. Job Note and Diary updated.`;
+            message = `Address checked. ${outcome.events} consent event(s) found. Note field updated; one Diary entry added.`;
           } catch (error) {
             console.error('BC Checker ServiceM8 update failed', { jobId, noteSaved,
               error: error instanceof Error ? error.message : 'Unknown error' });
-            message = `Address checked, but ServiceM8 ${noteSaved ? 'Diary' : 'Note and Diary'} update failed. Do not click again until the job is reviewed.`;
+            message = `Address checked, but ServiceM8 ${noteSaved ? 'Diary' : 'Note field'} update failed. Do not click again until the job is reviewed.`;
           }
         }
       } catch (error) {
