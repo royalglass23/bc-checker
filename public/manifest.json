@@ -2,7 +2,7 @@
   "$schema": "https://api.servicem8.com/api_1.0/addonsdk/manifest-schema/v1.json",
   "name": "RG BC Checker",
   "version": "0.1.0",
-  "iconURL": "https://bc-checker-rho.vercel.app/icon.svg",
+  "iconURL": "https://bc-checker-rho.vercel.app/icon.png",
   "supportEmail": "support@royalglass.co.nz",
   "oauth": {
     "scope": "vendor read_jobs"
@@ -12,7 +12,7 @@
     {
       "name": "RG BC Checker",
       "type": "addon",
-      "iconURL": "https://bc-checker-rho.vercel.app/icon.svg",
+      "iconURL": "https://bc-checker-rho.vercel.app/icon.png",
       "event": "rg_bc_checker_menu"
     }
   ]

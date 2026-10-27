@@ -1,6 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import manifest from '../manifest.json' with { type: 'json' };
+import manifest from '../public/manifest.json' with { type: 'json' };
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.mjs';
 import { database } from './db.mjs';
@@ -9,11 +9,20 @@ import { parseJobNumbers } from './domain.mjs';
 import { accessToken, consumeOAuthState, createOAuthState, exchangeCode,
   getJobByNumber, oauthAuthorizeUrl, saveConnection, vendorUUID } from './servicem8.mjs';
 
-const cfg = config();
-const db = database(cfg);
+let cfg;
+let db;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const textKey = new TextEncoder().encode(cfg.sessionSecret);
-const appOrigin = new URL(cfg.baseUrl).origin;
+let textKey;
+let appOrigin;
+
+function ensureConfigured() {
+  if (cfg) return;
+  const value = config();
+  cfg = value;
+  db = database(value);
+  textKey = new TextEncoder().encode(value.sessionSecret);
+  appOrigin = new URL(value.baseUrl).origin;
+}
 
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -235,13 +244,15 @@ async function stopJob(req, res, jobId) {
 }
 
 async function handle(req, res) {
-  const url = new URL(req.url, cfg.baseUrl);
+  const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return respond(res, 200, 'ok', 'text/plain');
   if (req.method === 'GET' && path === '/manifest.json') return respond(res, 200, JSON.stringify(manifest), 'application/json');
   if (req.method === 'GET' && path === '/style.css') return respond(res, 200, await readFile(new URL('./style.css', import.meta.url)), 'text/css');
   if (req.method === 'GET' && path === '/app.js') return respond(res, 200, await readFile(new URL('./app.js', import.meta.url)), 'text/javascript');
+  if (req.method === 'GET' && path === '/icon.png') return respond(res, 200, await readFile(new URL('../public/icon.png', import.meta.url)), 'image/png');
   if (req.method === 'GET' && path === '/icon.svg') return respond(res, 200, await readFile(new URL('./icon.svg', import.meta.url)), 'image/svg+xml');
+  ensureConfigured();
   if (req.method === 'GET' && path === '/oauth/start') {
     const state = await createOAuthState(cfg);
     return redirect(res, oauthAuthorizeUrl(cfg, state));
