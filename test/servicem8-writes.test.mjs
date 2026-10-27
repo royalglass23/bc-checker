@@ -1,6 +1,27 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { addDiaryItem, addJobNote, scopes } from '../src/servicem8.mjs';
+import { addDiaryItem, addJobNote, exchangeCode, scopes } from '../src/servicem8.mjs';
+
+test('add-on manifest requests the same ServiceM8 scopes as OAuth', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../public/manifest.json', import.meta.url)));
+  assert.equal(manifest.oauth.scope, scopes);
+});
+
+test('read-only ServiceM8 grant can fetch jobs while missing read permission is rejected', async () => {
+  const original = globalThis.fetch;
+  let granted = 'vendor read_jobs';
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({
+    access_token: 'access', refresh_token: 'refresh', expires_in: 3600, scope: granted,
+  }) });
+  try {
+    const cfg = { appId: 'app', appSecret: 'secret', baseUrl: 'https://bc-checker.example.test' };
+    const tokens = await exchangeCode(cfg, 'code');
+    assert.equal(tokens.scope, 'vendor read_jobs');
+    granted = 'vendor publish_job_notes publish_diary_items';
+    await assert.rejects(exchangeCode(cfg, 'code'), /ServiceM8 permissions are incomplete/);
+  } finally { globalThis.fetch = original; }
+});
 
 test('manual check writes use separate Job Note and attributed Diary endpoints', async () => {
   assert.match(scopes, /publish_job_notes/);
