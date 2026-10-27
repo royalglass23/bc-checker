@@ -297,7 +297,8 @@ async function handle(req, res) {
     try {
       const identity = await verifyEvent(await bodyText(req, 16_384));
       const session = await issueSession(identity, 'bc-checker-staff', 1800);
-      const html = await renderDashboard(identity, session, new URLSearchParams(), null, true);
+      const staffIdentity = await verifySession(session, 'bc-checker-staff');
+      const html = await renderDashboard(staffIdentity, session, new URLSearchParams(), null, true);
       return respond(res, 200, JSON.stringify({ eventResponse: html }), 'application/json');
     } catch { return respond(res, 401, JSON.stringify({ eventResponse: '<h1>BC Checker launch rejected</h1>' }), 'application/json'); }
   }

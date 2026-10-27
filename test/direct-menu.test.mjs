@@ -44,6 +44,18 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.doesNotMatch(html, /Opening…|Open BC Checker|\/launch/);
 
     const session = html.match(/name="session" value="([^"]+)"/)?.[1];
+    const csrf = html.match(/name="csrf" value="([^"]+)"/)?.[1];
+    const originalError = console.error;
+    const errors = [];
+    console.error = (...args) => errors.push(args);
+    try {
+      const add = await fetch(`${base}/jobs`, { method: 'POST',
+        headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ session, csrf, jobNumbers: '!' }),
+      });
+      assert.equal(add.status, 500);
+      assert.equal(errors.at(-1)?.[1]?.error, 'Enter 1–50 valid job numbers');
+    } finally { console.error = originalError; }
     const view = await fetch(`${base}/view`, { method: 'POST',
       body: new URLSearchParams({ session }),
     });
