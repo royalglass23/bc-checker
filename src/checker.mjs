@@ -50,7 +50,8 @@ export async function checkOne(cfg, row, deps = {}) {
     await client.query(`UPDATE monitored_jobs SET baseline_complete=true, last_checked_at=now(),
       next_check_at=now() + interval '13 days', last_error=NULL WHERE id=$1`, [row.id]);
     await client.query('COMMIT');
-    return { firstCheck, newCandidates, events: result.events.length };
+    return { firstCheck, newCandidates, events: result.events.length,
+      matchedAddress: result.matchedAddress, sourceUrl: result.sourceUrl };
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
 }

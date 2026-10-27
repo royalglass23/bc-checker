@@ -3,7 +3,7 @@ import { database, seal, unseal } from './db.mjs';
 
 const api = 'https://api.servicem8.com/api_1.0';
 const tokenUrl = 'https://go.servicem8.com/oauth/access_token';
-export const scopes = 'vendor read_jobs';
+export const scopes = 'vendor read_jobs publish_job_notes publish_diary_items';
 
 export function oauthAuthorizeUrl(cfg, state) {
   const url = new URL('https://go.servicem8.com/oauth/authorize');
@@ -89,6 +89,23 @@ export async function serviceM8Get(token, path) {
     signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`ServiceM8 returned ${response.status}`);
   return response.json();
+}
+
+async function serviceM8Post(token, path, body) {
+  const response = await fetch(`${api}${path}`, { method: 'POST', headers: {
+    Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json',
+  }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
+  if (!response.ok) throw new Error(`ServiceM8 write returned ${response.status}`);
+  return response;
+}
+
+export async function addJobNote(token, jobUUID, note) {
+  return serviceM8Post(token, '/note.json', { related_object: 'job', related_object_uuid: jobUUID, note });
+}
+
+export async function addDiaryItem(token, jobUUID, content) {
+  if (content.length > 1000) throw new Error('Diary item is too long');
+  return serviceM8Post(token, '/diary.json', { job_uuid: jobUUID, content });
 }
 
 export async function vendorUUID(token) {

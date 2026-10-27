@@ -44,6 +44,13 @@ test('embedded forms reach their validation and still require a valid CSRF token
     assert.equal(await submit('https://go.servicem8.com', { csrf }), 'Enter 1–50 valid job numbers');
     assert.equal(await submit('null', { csrf: 'forged' }), 'Invalid form token');
 
+    const manual = await fetch(`${base}/jobs/33333333-3333-4333-8333-333333333333/check`, {
+      method: 'POST', headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ session, csrf: 'forged' }),
+    });
+    assert.equal(manual.status, 500);
+    assert.equal(errors.pop()?.[1]?.error, 'Invalid form token');
+
     const view = await fetch(`${base}/view`, { method: 'POST',
       headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ session: 'invalid' }),
