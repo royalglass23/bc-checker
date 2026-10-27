@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { classifyEvent, consentIdentity, isIssued, latestConsentEvents, parseJobNumbers, selectExactProperty } from '../src/domain.mjs';
+
+test('CSV and pasted job numbers are deduplicated', () => {
+  assert.deepEqual(parseJobNumbers('Job Number,Address\nR123,12 Main St\nR123\nR124'), ['R123', 'R124']);
+  assert.deepEqual(parseJobNumbers('Client,Generated_Job_ID,Address\n"Example, Ltd",R125,"12 Main Street"'), ['R125']);
+});
+
+test('only one exact address match is accepted', () => {
+  const job = { job_address: '12 Main Street, Mount Eden, Auckland' };
+  const results = [
+    { Type: 4, PropertyID: 1, StreetNumber: '12', Street: 'Main Street', Suburb: 'Mount Eden' },
+    { Type: 4, PropertyID: 2, StreetNumber: '12', Street: 'Main Street', Suburb: 'Ponsonby' },
+  ];
+  assert.equal(selectExactProperty(job, results)?.PropertyID, 1);
+  assert.equal(selectExactProperty(job, [results[0], { ...results[0], PropertyID: 3 }]), null);
+  assert.equal(selectExactProperty(job, [results[1]]), null);
+});
+
+test('baseline and ignored consents never reappear as new on routine checks', () => {
+  const event = { number: 'BC123', date: '2026-10-20', action: 'issued', description: 'Pool fence' };
+  assert.equal(classifyEvent(event, null, true), 'baseline');
+  assert.equal(classifyEvent(event, { decision: 'ignored', was_issued: false }, false), 'ignored');
+  assert.equal(classifyEvent(event, { decision: 'baseline', was_issued: true }, false), 'baseline');
+  assert.equal(consentIdentity(event), consentIdentity({ ...event, action: 'updated' }));
+});
+
+test('a previously observed application gets one review when it becomes issued', () => {
+  const event = { number: 'BC123', date: '2026-10-20', action: 'issued', description: 'Pool fence' };
+  assert.equal(isIssued(event), true);
+  assert.equal(classifyEvent(event, { decision: 'baseline', was_issued: false }, false), 'needs_review');
+  assert.equal(classifyEvent(event, { decision: 'needs_review', was_issued: true }, false), 'needs_review');
+});
+
+test('newest status wins when a timeline includes several events for one BC', () => {
+  const older = { number: 'BC123', date: '2026-10-01', action: 'applied', description: 'Pool fence' };
+  const newer = { ...older, date: '2026-10-20', action: 'issued' };
+  assert.deepEqual(latestConsentEvents([newer, older]), [newer]);
+  assert.deepEqual(latestConsentEvents([older, newer]), [newer]);
+});

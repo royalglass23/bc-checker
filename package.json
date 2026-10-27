@@ -1,0 +1,16 @@
+{
+  "name": "rg-bc-checker-addon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "db:migrate": "node db/migrate.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "jose": "^6.2.12",
+    "pg": "^8.23.1"
+  }
+}
