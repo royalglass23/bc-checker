@@ -126,6 +126,14 @@ function actionForm(path, label, csrf, session = '', origin = '') {
   return `<form method="post" action="${escape(origin + path)}"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}<button type="submit">${escape(label)}</button></form>`;
 }
 
+function iconActionForm(path, action, jobNumber, csrf, session = '', origin = '') {
+  const label = `${action === 'check' ? 'Check now' : 'Stop monitoring'} Job ${jobNumber}`;
+  const icon = action === 'check'
+    ? '<path d="M7 4.5v15l12-7.5z"/>'
+    : '<rect x="6" y="6" width="12" height="12" rx="1"/>';
+  return `<form method="post" action="${escape(origin + path)}"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}<button class="icon-button ${action}" type="submit" aria-label="${escape(label)}" title="${escape(label)}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icon}</svg></button></form>`;
+}
+
 async function renderDashboard(identity, session, query, message, embedded = false) {
   const origin = embedded ? cfg.baseUrl : '';
   const search = String(query.get('search') ?? '').trim().slice(0, 100);
@@ -162,11 +170,11 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     const lastChecked = job.last_checked_at
       ? escape(new Date(job.last_checked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })) : 'Never';
     return {
-      row: `<tr><th scope="row">${escape(job.job_number)}</th><td>${escape(job.client_name || '—')}</td><td class="address-cell">${escape(job.job_address)}</td>
-        <td>${lastChecked}${job.last_error ? `<span class="error">Check failed: ${escape(job.last_error)}</span>` : ''}</td>
+      row: `<tr><th scope="row">${escape(job.job_number)}</th><td class="client-cell">${escape(job.client_name || '—')}</td><td class="address-cell">${escape(job.job_address)}</td>
+        <td class="checked-cell">${lastChecked}${job.last_error ? `<span class="error">Check failed: ${escape(job.last_error)}</span>` : ''}</td>
         <td><span class="pill ${review ? 'attention' : ''}">${status}</span></td>
-        <td>${actionForm(`/jobs/${job.id}/check`, 'Check now', csrf, session, origin)}</td>
-        <td>${actionForm(`/jobs/${job.id}/stop`, 'Stop monitoring', csrf, session, origin)}</td></tr>`,
+        <td class="row-action">${iconActionForm(`/jobs/${job.id}/check`, 'check', job.job_number, csrf, session, origin)}</td>
+        <td class="row-action">${iconActionForm(`/jobs/${job.id}/stop`, 'stop', job.job_number, csrf, session, origin)}</td></tr>`,
       candidates: rows.length ? `<section class="candidate-panel" aria-label="Consent candidates for Job ${escape(job.job_number)}">
         <h3>Consent candidates for Job ${escape(job.job_number)}</h3>
         <ul>${rows.map(renderCandidate).join('')}</ul></section>` : '',
@@ -190,7 +198,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     <button id="addJobsButton" type="submit">Add Job Numbers</button><span id="addJobsStatus" class="submit-status" role="status" aria-live="polite"></span></form></section>
     <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${term ? `${total} matching` : `${total} active`} ${total === 1 ? 'job' : 'jobs'}</p></div>
     <form id="jobSearchForm" class="job-search" method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}">${hiddenSession(session)}<input type="hidden" name="size" value="${pageSize}"><label for="jobSearch">Search jobs</label><input id="jobSearch" name="search" type="search" minlength="3" maxlength="100" value="${escape(search)}" placeholder="Job number, address or client" autocomplete="off"${term ? ' autofocus' : ''}><button type="submit">Search</button>${term ? '<button id="clearSearch" type="button">Clear</button>' : ''}</form></div>
-    ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Client</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check now</th><th scope="col">Stop monitoring</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : `<p class="empty">${term ? `No monitored jobs match “${escape(term)}”.` : 'No jobs are being monitored. Add a job number to start.'}</p>`}
+    ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Client</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check</th><th scope="col">Stop</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : `<p class="empty">${term ? `No monitored jobs match “${escape(term)}”.` : 'No jobs are being monitored. Add a job number to start.'}</p>`}
     ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div>
     <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<input type="hidden" name="search" value="${escape(term)}"><label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>`, true, embedded);
 }

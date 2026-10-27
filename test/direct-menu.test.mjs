@@ -49,12 +49,14 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /href="https:\/\/bc-checker\.example\.test\/style\.css"/);
     assert.match(html, /name="session" value="[^"]+"/);
     assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/check"/);
-    for (const heading of ['Job number', 'Address', 'Client', 'Last checked', 'Status', 'Check now', 'Stop monitoring']) {
+    for (const heading of ['Job number', 'Address', 'Client', 'Last checked', 'Status', 'Check', 'Stop']) {
       assert.match(html, new RegExp(`<th scope="col">${heading}</th>`));
     }
     assert.match(html, /<th scope="col">Job number<\/th><th scope="col">Client<\/th><th scope="col">Address<\/th>/);
     assert.match(html, /<tbody><tr><th scope="row">R123<\/th>/);
-    assert.match(html, /<tbody><tr><th scope="row">R123<\/th><td>Example Client<\/td><td class="address-cell">1 Example Street<\/td>/);
+    assert.match(html, /<tbody><tr><th scope="row">R123<\/th><td class="client-cell">Example Client<\/td><td class="address-cell">1 Example Street<\/td>/);
+    assert.match(html, /class="icon-button check" type="submit" aria-label="Check now Job R123"/);
+    assert.match(html, /class="icon-button stop" type="submit" aria-label="Stop monitoring Job R123"/);
     assert.match(html, /Add Job Numbers/);
     assert.match(html, /id="jobSearch"/);
     assert.match(html, /Consent candidates for Job R123/);
