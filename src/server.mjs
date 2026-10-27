@@ -184,9 +184,8 @@ async function renderDashboard(identity, session, query, message, embedded = fal
   const pageControl = (number, label, rel) => session
     ? `<form method="post" action="${escape(origin)}/view"><input type="hidden" name="session" value="${escape(session)}"><input type="hidden" name="search" value="${escape(term)}"><input type="hidden" name="page" value="${number}"><input type="hidden" name="size" value="${pageSize}"><button type="submit">${label}</button></form>`
     : `<a href="/?page=${number}&amp;size=${pageSize}&amp;search=${encodeURIComponent(term)}" rel="${rel}">${label}</a>`;
-  return page('Monitored jobs', `<header><p class="eyebrow">Royal Glass · ServiceM8 add-on</p><h1>BC Checker</h1>
+  return page('Monitored jobs', `<div class="top-panels"><header><p class="eyebrow">Royal Glass · ServiceM8 add-on</p><h1>BC Checker</h1>
     <p>Track Auckland jobs every 14 days. Existing consents form a baseline; only newly seen candidates need review.</p>${session ? '<p>Use the surrounding ServiceM8 navigation to leave BC Checker.</p>' : ''}</header>
-    ${flash ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
     <section class="add"><h2>Add jobs to monitor</h2><p>Enter job numbers or upload a CSV or XLSX export. Files can include a Job Number or Generated_Job_ID column.</p>
     <form method="post" action="${escape(origin)}/jobs"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}
     <div class="add-fields">
@@ -195,7 +194,8 @@ async function renderDashboard(identity, session, query, message, embedded = fal
       <p id="fileHelp" class="hint">CSV or XLSX · first worksheet · up to 50 jobs at a time</p>
       <p id="fileStatus" class="hint" role="status" aria-live="polite"></p></div>
     </div>
-    <button id="addJobsButton" type="submit">Add Job Numbers</button><span id="addJobsStatus" class="submit-status" role="status" aria-live="polite"></span></form></section>
+    <button id="addJobsButton" type="submit">Add Job Numbers</button><span id="addJobsStatus" class="submit-status" role="status" aria-live="polite"></span></form></section></div>
+    ${flash ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
     <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${term ? `${total} matching` : `${total} active`} ${total === 1 ? 'job' : 'jobs'}</p></div>
     <form id="jobSearchForm" class="job-search" method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}">${hiddenSession(session)}<input type="hidden" name="size" value="${pageSize}"><label for="jobSearch">Search jobs</label><input id="jobSearch" name="search" type="search" minlength="3" maxlength="100" value="${escape(search)}" placeholder="Job number, address or client" autocomplete="off"${term ? ' autofocus' : ''}><button type="submit">Search</button>${term ? '<button id="clearSearch" type="button">Clear</button>' : ''}</form></div>
     ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Client</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check</th><th scope="col">Stop</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : `<p class="empty">${term ? `No monitored jobs match “${escape(term)}”.` : 'No jobs are being monitored. Add a job number to start.'}</p>`}
