@@ -3,8 +3,8 @@ import { database, seal, unseal } from './db.mjs';
 
 const api = 'https://api.servicem8.com/api_1.0';
 const tokenUrl = 'https://go.servicem8.com/oauth/access_token';
-export const scopes = 'vendor read_jobs publish_job_notes publish_diary_items';
-const readScopes = ['vendor', 'read_jobs'];
+export const scopes = 'vendor read_jobs read_customers manage_jobs publish_diary_items';
+const readScopes = ['vendor', 'read_jobs', 'read_customers'];
 
 export function oauthAuthorizeUrl(cfg, state) {
   const url = new URL('https://go.servicem8.com/oauth/authorize');
@@ -100,10 +100,6 @@ async function serviceM8Post(token, path, body) {
   return response;
 }
 
-export async function addJobNote(token, jobUUID, note) {
-  return serviceM8Post(token, '/note.json', { related_object: 'job', related_object_uuid: jobUUID, note });
-}
-
 export async function addDiaryItem(token, jobUUID, content) {
   if (content.length > 1000) throw new Error('Diary item is too long');
   return serviceM8Post(token, '/diary.json', { job_uuid: jobUUID, content });
@@ -127,4 +123,24 @@ export async function getJobByNumber(token, number) {
 
 export async function getJobByUUID(token, uuid) {
   return serviceM8Get(token, `/job/${encodeURIComponent(uuid)}.json`);
+}
+
+export async function updateJobNoteField(token, jobUUID, merge) {
+  const path = `/job/${encodeURIComponent(jobUUID)}.json`;
+  const job = await serviceM8Get(token, path);
+  if (!Object.hasOwn(job, 'customfield_note_')) throw new Error('ServiceM8 Job Note field is unavailable');
+  const current = String(job.customfield_note_ ?? '');
+  const next = merge(current);
+  if (next === null) throw new Error('ServiceM8 Job Note has an incomplete BC marker');
+  if (next === current) return 'current';
+  await serviceM8Post(token, path, { customfield_note_: next });
+  const verified = await serviceM8Get(token, path);
+  if (String(verified.customfield_note_ ?? '') !== next) throw new Error('ServiceM8 Job Note update could not be verified');
+  return 'updated';
+}
+
+export async function getClientName(token, companyUUID) {
+  if (!companyUUID) return '';
+  const company = await serviceM8Get(token, `/company/${encodeURIComponent(companyUUID)}.json`);
+  return String(company.name ?? '').trim().slice(0, 100);
 }

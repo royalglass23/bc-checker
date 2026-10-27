@@ -33,10 +33,11 @@ export function selectExactProperty(job, results) {
 
 export function consentEvents(timeline) {
   return (Array.isArray(timeline?.events) ? timeline.events : [])
-    .filter(item => String(item.key).toLowerCase() === 'consent')
+    .filter(item => ['consent', 'building_consent', 'resource_consent'].includes(String(item.key).toLowerCase()))
     .map(item => {
       const data = item.data ?? {};
       return {
+        kind: String(data.consent_type ?? data.category ?? data.consent_category ?? item.key ?? '').trim(),
         number: String(data.consent_id ?? data.consent_number ?? data.bc_number ??
           data.application_number ?? item.source_id ?? '').trim(),
         date: String(data.occured_on ?? item.date ?? '').trim(),

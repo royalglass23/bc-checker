@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS monitored_jobs (
   job_uuid uuid NOT NULL,
   job_number text NOT NULL,
   job_address text NOT NULL,
+  client_name text NOT NULL DEFAULT '',
   job_description text NOT NULL DEFAULT '',
   status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'stopped')),
   baseline_complete boolean NOT NULL DEFAULT false,
@@ -35,6 +36,8 @@ CREATE TABLE IF NOT EXISTS monitored_jobs (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (account_uuid, job_uuid)
 );
+
+ALTER TABLE monitored_jobs ADD COLUMN IF NOT EXISTS client_name text NOT NULL DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS monitored_jobs_due_idx
   ON monitored_jobs (next_check_at) WHERE status = 'active';

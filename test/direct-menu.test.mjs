@@ -18,12 +18,14 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     CRON_SECRET: 'test-cron-secret-at-least-32-characters',
   });
   const originalQuery = pg.Pool.prototype.query;
-  pg.Pool.prototype.query = async function (sql) {
+  const searches = [];
+  pg.Pool.prototype.query = async function (sql, params) {
     if (sql.includes('INSERT INTO used_events')) return { rowCount: 1, rows: [{ event_hash: 'used' }] };
+    if (sql.includes('FROM monitored_jobs')) searches.push(params?.[2]);
     if (sql.includes('count(*)::int')) return { rows: [{ total: 1 }] };
     if (sql.includes('FROM monitored_jobs')) return { rows: [{ id: '33333333-3333-4333-8333-333333333333',
       job_uuid: '44444444-4444-4444-8444-444444444444', job_number: 'R123',
-      job_address: '1 Example Street', baseline_complete: false, last_checked_at: null }] };
+      job_address: '1 Example Street', client_name: 'Example Client', baseline_complete: false, last_checked_at: null }] };
     if (sql.includes('FROM consent_candidates')) return { rows: [{ id: '55555555-5555-4555-8555-555555555555',
       monitored_job_id: '33333333-3333-4333-8333-333333333333', decision: 'needs_review',
       consent_number: 'BC123', action: 'Issued', event_date: '2026-10-28',
@@ -47,10 +49,13 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /href="https:\/\/bc-checker\.example\.test\/style\.css"/);
     assert.match(html, /name="session" value="[^"]+"/);
     assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/check"/);
-    for (const heading of ['Job number', 'Address', 'Last checked', 'Status', 'Check now', 'Stop monitoring']) {
+    for (const heading of ['Job number', 'Address', 'Client', 'Last checked', 'Status', 'Check now', 'Stop monitoring']) {
       assert.match(html, new RegExp(`<th scope="col">${heading}</th>`));
     }
     assert.match(html, /<tbody><tr><th scope="row">R123<\/th>/);
+    assert.match(html, /Example Client/);
+    assert.match(html, /Add Job Numbers/);
+    assert.match(html, /id="jobSearch"/);
     assert.match(html, /Consent candidates for Job R123/);
     assert.match(html, /BC123/);
     assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/stop"/);
@@ -77,6 +82,12 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     });
     assert.equal(view.status, 200);
     assert.match(await view.text(), /<h1>BC Checker<\/h1>/);
+    const filtered = await fetch(`${base}/view`, { method: 'POST',
+      body: new URLSearchParams({ session, search: 'Exam', page: '1' }),
+    });
+    assert.equal(filtered.status, 200);
+    assert.match(await filtered.text(), /value="Exam"/);
+    assert.ok(searches.includes('Exam'));
   } finally {
     pg.Pool.prototype.query = originalQuery;
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));

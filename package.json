@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env server.ts",
     "db:migrate": "node --env-file-if-exists=.env db/migrate.mjs",
+    "db:backfill-clients": "node --env-file-if-exists=.env db/backfill-client-names.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {

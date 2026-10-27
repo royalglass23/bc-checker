@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { bcStatus } from './bc-note.mjs';
 import { database } from './db.mjs';
 import { classifyEvent, consentIdentity, isIssued, latestConsentEvents, normaliseAddress } from './domain.mjs';
 import { lookupConsents } from './homes.mjs';
@@ -51,6 +52,7 @@ export async function checkOne(cfg, row, deps = {}) {
       next_check_at=now() + interval '13 days', last_error=NULL WHERE id=$1`, [row.id]);
     await client.query('COMMIT');
     return { firstCheck, newCandidates, events: result.events.length,
+      noteStatus: bcStatus(result.events),
       matchedAddress: result.matchedAddress, sourceUrl: result.sourceUrl };
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
