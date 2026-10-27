@@ -52,8 +52,9 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     for (const heading of ['Job number', 'Address', 'Client', 'Last checked', 'Status', 'Check now', 'Stop monitoring']) {
       assert.match(html, new RegExp(`<th scope="col">${heading}</th>`));
     }
+    assert.match(html, /<th scope="col">Job number<\/th><th scope="col">Client<\/th><th scope="col">Address<\/th>/);
     assert.match(html, /<tbody><tr><th scope="row">R123<\/th>/);
-    assert.match(html, /Example Client/);
+    assert.match(html, /<tbody><tr><th scope="row">R123<\/th><td>Example Client<\/td><td class="address-cell">1 Example Street<\/td>/);
     assert.match(html, /Add Job Numbers/);
     assert.match(html, /id="jobSearch"/);
     assert.match(html, /Consent candidates for Job R123/);
