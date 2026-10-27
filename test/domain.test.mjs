@@ -1,10 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyEvent, consentIdentity, isIssued, latestConsentEvents, parseJobNumbers, selectExactProperty } from '../src/domain.mjs';
+import { classifyEvent, consentIdentity, isIssued, jobPage, latestConsentEvents, parseJobNumbers, selectExactProperty } from '../src/domain.mjs';
 
 test('CSV and pasted job numbers are deduplicated', () => {
   assert.deepEqual(parseJobNumbers('Job Number,Address\nR123,12 Main St\nR123\nR124'), ['R123', 'R124']);
   assert.deepEqual(parseJobNumbers('Client,Generated_Job_ID,Address\n"Example, Ltd",R125,"12 Main Street"'), ['R125']);
+});
+
+test('monitored jobs default to five per page and clamp page requests', () => {
+  assert.deepEqual(jobPage(null, null, 12), { size: 5, pages: 3, page: 1, offset: 0 });
+  assert.deepEqual(jobPage('10', '2', 24), { size: 10, pages: 3, page: 2, offset: 10 });
+  assert.deepEqual(jobPage('20', '99', 24), { size: 20, pages: 2, page: 2, offset: 20 });
+  assert.deepEqual(jobPage('50', '1', 24), { size: 50, pages: 1, page: 1, offset: 0 });
+  assert.deepEqual(jobPage('500', '-1', 0), { size: 5, pages: 1, page: 1, offset: 0 });
 });
 
 test('only one exact address match is accepted', () => {

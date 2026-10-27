@@ -22,6 +22,11 @@ test('manifest and PNG icon are served without application credentials', async (
     assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
     assert.equal(bytes.readUInt32BE(16), 512);
     assert.equal(bytes.readUInt32BE(20), 512);
+
+    const xlsxResponse = await fetch(`${base}/xlsx.js`);
+    assert.equal(xlsxResponse.status, 200);
+    assert.match(xlsxResponse.headers.get('content-type'), /^text\/javascript/);
+    assert.match(await xlsxResponse.text(), /readXlsxFile/);
   } finally {
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
