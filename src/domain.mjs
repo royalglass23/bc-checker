@@ -107,3 +107,11 @@ export function parseJobNumbers(raw) {
   const data = headerIndex >= 0 ? rows.slice(1) : rows;
   return [...new Set(data.map(row => row[index] ?? '').filter(number => /^[A-Za-z0-9-]{1,30}$/.test(number)))];
 }
+
+export function jobPage(rawSize, rawPage, total) {
+  const size = [5, 10, 20, 50].includes(Number(rawSize)) ? Number(rawSize) : 5;
+  const pages = Math.max(1, Math.ceil(total / size));
+  const requested = /^\d+$/.test(rawPage ?? '') ? Number(rawPage) : 1;
+  const page = Math.min(Math.max(requested, 1), pages);
+  return { size, pages, page, offset: (page - 1) * size };
+}

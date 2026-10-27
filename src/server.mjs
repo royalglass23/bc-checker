@@ -5,7 +5,7 @@ import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.mjs';
 import { database } from './db.mjs';
 import { runDueChecks } from './checker.mjs';
-import { parseJobNumbers } from './domain.mjs';
+import { jobPage, parseJobNumbers } from './domain.mjs';
 import { accessToken, consumeOAuthState, createOAuthState, exchangeCode,
   getJobByNumber, oauthAuthorizeUrl, saveConnection, vendorUUID } from './servicem8.mjs';
 
@@ -109,8 +109,8 @@ async function verifyEvent(token) {
     staffUUID: String(payload.auth.staffUUID).toLowerCase() };
 }
 
-function page(title, body) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · RG BC Checker</title><link rel="stylesheet" href="/style.css"></head><body><main>${body}</main><script src="/app.js" defer></script></body></html>`;
+function page(title, body, dashboardScripts = false) {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · RG BC Checker</title><link rel="stylesheet" href="/style.css"></head><body><main>${body}</main>${dashboardScripts ? '<script src="/xlsx.js" defer></script><script src="/app.js" defer></script>' : ''}</body></html>`;
 }
 
 function actionForm(path, label, csrf, extra = '') {
@@ -120,10 +120,18 @@ function actionForm(path, label, csrf, extra = '') {
 async function dashboard(req, res) {
   const identity = await staff(req, res);
   if (!identity) return;
-  const jobs = await db.query('SELECT * FROM monitored_jobs WHERE account_uuid=$1 AND status=$2 ORDER BY created_at DESC',
+  const query = new URL(req.url, cfg.baseUrl).searchParams;
+  const count = await db.query('SELECT count(*)::int AS total FROM monitored_jobs WHERE account_uuid=$1 AND status=$2',
     [identity.accountUUID, 'active']);
+  const total = count.rows[0].total;
+  const { size: pageSize, pages: pageCount, page: currentPage, offset } = jobPage(
+    query.get('size'), query.get('page'), total);
+  const jobs = await db.query(`SELECT * FROM monitored_jobs WHERE account_uuid=$1 AND status=$2
+    ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4`,
+    [identity.accountUUID, 'active', pageSize, offset]);
   const candidates = await db.query(`SELECT c.* FROM consent_candidates c JOIN monitored_jobs j ON j.id=c.monitored_job_id
-    WHERE j.account_uuid=$1 AND j.status='active' ORDER BY c.first_seen_at DESC`, [identity.accountUUID]);
+    WHERE j.account_uuid=$1 AND j.status='active' AND j.id=ANY($2::uuid[])
+    ORDER BY c.first_seen_at DESC`, [identity.accountUUID, jobs.rows.map(job => job.id)]);
   const byJob = Map.groupBy(candidates.rows, row => row.monitored_job_id);
   const csrf = csrfFor(identity);
   const cards = jobs.rows.map(job => {
@@ -150,17 +158,22 @@ async function dashboard(req, res) {
       <details><summary>Stop monitoring this job</summary>${actionForm(`/jobs/${job.id}/stop`, 'Remove from monitoring', csrf)}</details>
       </article>`;
   }).join('');
-  const flash = new URL(req.url, cfg.baseUrl).searchParams.get('message');
+  const flash = query.get('message');
+  const pageHref = number => `/?page=${number}&amp;size=${pageSize}`;
   const html = page('Monitored jobs', `<header><p class="eyebrow">Royal Glass · ServiceM8 add-on</p><h1>BC Checker</h1>
     <p>Track Auckland jobs every 14 days. Existing consents form a baseline; only newly seen candidates need review.</p></header>
     ${flash ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
-    <section class="add"><h2>Add jobs</h2><p>Paste job numbers, one per line, or load a CSV export. The first column should contain the job number.</p>
+    <section class="add"><h2>Add jobs to monitor</h2><p>Enter job numbers or upload a CSV or XLSX export. Files can include a Job Number or Generated_Job_ID column.</p>
     <form method="post" action="/jobs"><input type="hidden" name="csrf" value="${csrf}">
-    <label for="jobNumbers">Job numbers</label><textarea id="jobNumbers" name="jobNumbers" rows="5" maxlength="20000" required></textarea>
-    <label for="csvFile">Or choose a CSV file</label><input id="csvFile" type="file" accept=".csv,text/csv">
-    <button type="submit">Add to monitoring</button></form></section>
-    <section aria-label="Monitored jobs"><h2>${jobs.rows.length} active ${jobs.rows.length === 1 ? 'job' : 'jobs'}</h2>
-    ${cards || '<p class="empty">No jobs are being monitored. Add a job number to start.</p>'}</section>`);
+    <label for="jobNumbers">Job numbers</label><textarea id="jobNumbers" name="jobNumbers" rows="3" maxlength="20000" placeholder="One job number per line" required></textarea>
+    <label for="jobFile">Or upload a list</label><input id="jobFile" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-describedby="fileHelp">
+    <p id="fileHelp" class="hint">CSV or XLSX · first worksheet · up to 50 jobs at a time</p>
+    <p id="fileStatus" class="hint" role="status" aria-live="polite"></p>
+    <button id="addJobsButton" type="submit">Add to monitoring</button></form></section>
+    <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${total} active ${total === 1 ? 'job' : 'jobs'}</p></div>
+    <form method="get" action="/" class="page-size"><label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></div>
+    ${cards || '<p class="empty">No jobs are being monitored. Add a job number to start.</p>'}
+    ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? `<a href="${pageHref(currentPage - 1)}" rel="prev">Previous</a>` : ''}${currentPage < pageCount ? `<a href="${pageHref(currentPage + 1)}" rel="next">Next</a>` : ''}</div></nav>` : ''}</section>`, true);
   respond(res, 200, html, 'text/html; charset=utf-8', {
     'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
   });
@@ -250,6 +263,8 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/manifest.json') return respond(res, 200, JSON.stringify(manifest), 'application/json');
   if (req.method === 'GET' && path === '/style.css') return respond(res, 200, await readFile(new URL('./style.css', import.meta.url)), 'text/css');
   if (req.method === 'GET' && path === '/app.js') return respond(res, 200, await readFile(new URL('./app.js', import.meta.url)), 'text/javascript');
+  if (req.method === 'GET' && path === '/xlsx.js') return respond(res, 200,
+    await readFile(new URL('../public/xlsx.js', import.meta.url)), 'text/javascript');
   if (req.method === 'GET' && path === '/icon.png') return respond(res, 200, await readFile(new URL('../public/icon.png', import.meta.url)), 'image/png');
   if (req.method === 'GET' && path === '/icon.svg') return respond(res, 200, await readFile(new URL('./icon.svg', import.meta.url)), 'image/svg+xml');
   ensureConfigured();

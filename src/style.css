@@ -1,14 +1,16 @@
-:root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:#173039;background:#f3f7f6}
+:root{font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;color:#173039;background:#f3f7f6}
 *{box-sizing:border-box}body{margin:0}main{max-width:960px;margin:0 auto;padding:36px 18px 80px}
-header{padding:28px 32px;background:#123c42;color:white;border-radius:18px;margin-bottom:24px}
+header{padding:28px 32px;background:#123c42;color:white;border-radius:3px;margin-bottom:24px}
 header p{max-width:680px;line-height:1.5}.eyebrow{text-transform:uppercase;letter-spacing:.1em;font-size:.75rem;color:#a6dbd4}
 h1{font-size:2rem;margin:.2em 0}h2{font-size:1.2rem;margin:0 0 12px}section{margin-bottom:24px}
-.add,.job{background:#fff;border:1px solid #d6e3e0;border-radius:16px;padding:24px;margin:16px 0;box-shadow:0 4px 20px #163d4210}
-label{display:block;font-weight:650;margin:16px 0 6px}textarea,input[type=file]{display:block;width:100%;font:inherit}textarea{border:1px solid #a7bab6;border-radius:8px;padding:12px}
-button{font:inherit;border:0;border-radius:8px;padding:10px 14px;background:#0d655c;color:white;cursor:pointer;margin-top:12px}
-button:hover{background:#084941}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #f3a536;outline-offset:2px}
-.job-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.job-head p{margin:0}.pill{display:inline-block;border-radius:999px;background:#e5f0ed;padding:5px 9px;font-size:.8rem;white-space:nowrap;text-transform:capitalize}
+.add,.job{background:#fff;border:1px solid #d6e3e0;border-radius:3px;padding:24px;margin:16px 0;box-shadow:0 4px 20px #163d4210}
+label{display:block;font-weight:650;margin:16px 0 6px}textarea,input[type=file]{display:block;width:100%;font:inherit}textarea{border:1px solid #a7bab6;border-radius:3px;padding:12px}
+button{font:inherit;border:0;border-radius:3px;padding:10px 14px;background:#0d655c;color:white;cursor:pointer;margin-top:12px}
+button:hover{background:#084941}button:disabled{opacity:.55;cursor:not-allowed}button:focus-visible,a:focus-visible,summary:focus-visible,select:focus-visible,textarea:focus-visible,input:focus-visible{outline:3px solid #f3a536;outline-offset:2px}
+.job-head{display:flex;justify-content:space-between;gap:14px;align-items:flex-start}.job-head p{margin:0}.pill{display:inline-block;border-radius:3px;background:#e5f0ed;padding:5px 9px;font-size:.8rem;white-space:nowrap;text-transform:capitalize}
 .pill.attention{background:#fff1ce;color:#73510a}.description,.meta,.empty{color:#4b646a}.meta{font-size:.85rem}.error{color:#aa342c}
 ul{list-style:none;padding:0}.candidate{border-top:1px solid #e4ecea;padding:14px 0}.candidate p{margin:6px 0}.candidate a{color:#0b665e}
 .actions{display:flex;gap:8px;flex-wrap:wrap}.actions form{display:inline}.actions button{margin-top:8px}details{margin-top:18px}summary{cursor:pointer;color:#456369}
-.flash{border-left:4px solid #0d655c;padding:12px 16px;background:#e2f4ef;border-radius:6px}@media(max-width:600px){.job-head{display:block}.job-head .pill{margin-top:12px}}
+.flash{border:1px solid #b8d9d1;padding:12px 16px;background:#e2f4ef;border-radius:3px}
+.hint{color:#4b646a;margin:6px 0 0;line-height:1.5}.list-heading,.pagination{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}.list-heading{margin:30px 0 16px}.list-heading h2{margin:0}.page-size{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.page-size label{margin:0}.page-size select{font:inherit;min-height:44px;border:1px solid #a7bab6;border-radius:3px;background:#fff;padding:0 10px}.page-size button{margin:0;min-height:44px}.pagination{padding:14px 0;color:#4b646a}.pagination div{display:flex;gap:8px}.pagination a{display:inline-flex;min-height:44px;align-items:center;border:1px solid #a7bab6;border-radius:3px;padding:0 14px;color:#0b665e;background:#fff;text-decoration:none}.pagination a:hover{background:#e5f0ed}
+@media(max-width:600px){.job-head{display:block}.job-head .pill{margin-top:12px}.list-heading{align-items:flex-start}.page-size{width:100%}}
