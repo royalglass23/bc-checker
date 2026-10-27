@@ -4,9 +4,9 @@ import manifest from '../public/manifest.json' with { type: 'json' };
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.mjs';
 import { database } from './db.mjs';
-import { runDueChecks } from './checker.mjs';
+import { checkOne, runDueChecks } from './checker.mjs';
 import { jobPage, parseJobNumbers } from './domain.mjs';
-import { accessToken, consumeOAuthState, createOAuthState, exchangeCode,
+import { accessToken, addDiaryItem, addJobNote, consumeOAuthState, createOAuthState, exchangeCode,
   getJobByNumber, oauthAuthorizeUrl, saveConnection, vendorUUID } from './servicem8.mjs';
 
 let cfg;
@@ -147,15 +147,17 @@ async function renderDashboard(identity, session, query, message, embedded = fal
            ${actionForm(`/candidates/${row.id}/confirm`, 'Right BC — stop checking', csrf, session, origin)}`}</div></li>`;
     const events = rows.filter(row => row.decision !== 'ignored').map(renderCandidate).join('');
     const ignored = rows.filter(row => row.decision === 'ignored').map(renderCandidate).join('');
-    return `<article class="job"><div class="job-head"><div><h2>Job ${escape(job.job_number)}</h2><p>${escape(job.job_address)}</p></div>
-      <span class="pill ${review ? 'attention' : ''}">${review ? `${review} to review` : job.baseline_complete ? 'Monitoring' : 'Waiting for first check'}</span></div>
+    return `<article class="job"><div class="job-row"><div class="job-identity"><h3>Job ${escape(job.job_number)}</h3><span>${escape(job.job_address)}</span></div>
+      <span class="pill ${review ? 'attention' : ''}">${review ? `${review} to review` : job.baseline_complete ? 'Monitoring' : 'Waiting for first check'}</span>
+      <div class="job-controls">${actionForm(`/jobs/${job.id}/check`, 'Check this address now', csrf, session, origin)}</div>
+      <details class="job-details"><summary>Details</summary><div class="job-details-body">
       ${job.job_description ? `<p class="description">${escape(job.job_description.slice(0, 350))}</p>` : ''}
       <p class="meta">Last checked: ${job.last_checked_at ? escape(new Date(job.last_checked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })) : 'Never'}
       ${job.last_error ? `<br><span class="error">Check failed: ${escape(job.last_error)}</span>` : ''}</p>
       ${events ? `<ul>${events}</ul>` : `<p class="empty">No consent candidates recorded yet.</p>`}
       ${ignored ? `<details><summary>${rows.filter(row => row.decision === 'ignored').length} dismissed candidate(s)</summary><ul>${ignored}</ul></details>` : ''}
       <details><summary>Stop monitoring this job</summary>${actionForm(`/jobs/${job.id}/stop`, 'Remove from monitoring', csrf, session, origin)}</details>
-      </article>`;
+      </div></details></div></article>`;
   }).join('');
   const flash = message ?? query.get('message');
   const pageControl = (number, label, rel) => session
@@ -171,10 +173,10 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     <p id="fileHelp" class="hint">CSV or XLSX · first worksheet · up to 50 jobs at a time</p>
     <p id="fileStatus" class="hint" role="status" aria-live="polite"></p>
     <button id="addJobsButton" type="submit">Add to monitoring</button></form></section>
-    <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${total} active ${total === 1 ? 'job' : 'jobs'}</p></div>
-    <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></div>
+    <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${total} active ${total === 1 ? 'job' : 'jobs'}</p></div></div>
     ${cards || '<p class="empty">No jobs are being monitored. Add a job number to start.</p>'}
-    ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div></nav>` : ''}</section>`, true, embedded);
+    ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div>
+    <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>`, true, embedded);
 }
 
 async function dashboard(req, res, params, message) {
@@ -267,6 +269,64 @@ async function stopJob(req, res, jobId) {
   redirect(res, '/?message=Job%20removed%20from%20monitoring.');
 }
 
+async function checkJobNow(req, res, jobId) {
+  const params = new URLSearchParams(await bodyText(req));
+  const identity = await staff(req, res, params);
+  if (!identity) return;
+  checkForm(params, identity);
+  const found = await db.query(`SELECT * FROM monitored_jobs WHERE id=$1 AND account_uuid=$2 AND status='active'`,
+    [jobId, identity.accountUUID]);
+  const job = found.rows[0];
+  if (!job) throw new Error('Monitored job is no longer active');
+  const connection = await db.query('SELECT scope FROM oauth_connections WHERE account_uuid=$1', [identity.accountUUID]);
+  const granted = new Set(String(connection.rows[0]?.scope ?? '').split(/\s+/));
+  if (!granted.has('publish_job_notes') || !granted.has('publish_diary_items')) {
+    const message = 'Reconnect BC Checker in ServiceM8 to enable Job Note and Diary updates.';
+    if (params.has('session')) return dashboard(req, res, params, message);
+    return redirect(res, `/?message=${encodeURIComponent(message)}`);
+  }
+  const lease = await db.connect();
+  let message;
+  try {
+    const lockKey = `bc-checker-manual:${jobId}`;
+    const lock = await lease.query('SELECT pg_try_advisory_lock(hashtext($1)) AS acquired', [lockKey]);
+    if (!lock.rows[0].acquired) {
+      message = 'This address is already being checked. Refresh shortly.';
+    } else {
+      try {
+        const outcome = await checkOne(cfg, job);
+        if (outcome.skipped) {
+          message = 'This job is no longer being monitored.';
+        } else {
+          const date = new Date().toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' });
+          const content = `BC Checker address check — ${date}\nJob ${job.job_number}: ${outcome.matchedAddress || job.job_address}\n${outcome.events} consent event(s) found; ${outcome.firstCheck ? 'first check baseline recorded' : `${outcome.newCandidates} new candidate(s) to review`}. Address results are candidates until staff confirm the right BC.\nSource: ${outcome.sourceUrl}`.slice(0, 1000);
+          let noteSaved = false;
+          try {
+            const token = await accessToken(cfg, identity.accountUUID);
+            await addJobNote(token, job.job_uuid, content);
+            noteSaved = true;
+            await addDiaryItem(token, job.job_uuid, content);
+            message = `Address checked. ${outcome.events} consent event(s) found. Job Note and Diary updated.`;
+          } catch (error) {
+            console.error('BC Checker ServiceM8 update failed', { jobId, noteSaved,
+              error: error instanceof Error ? error.message : 'Unknown error' });
+            message = `Address checked, but ServiceM8 ${noteSaved ? 'Diary' : 'Note and Diary'} update failed. Do not click again until the job is reviewed.`;
+          }
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : 'Unknown check error';
+        await db.query(`UPDATE monitored_jobs SET last_error=$2 WHERE id=$1 AND account_uuid=$3 AND status='active'`,
+          [jobId, detail.slice(0, 250), identity.accountUUID]);
+        message = `Address check failed: ${detail}`;
+      } finally {
+        await lease.query('SELECT pg_advisory_unlock(hashtext($1))', [lockKey]).catch(() => {});
+      }
+    }
+  } finally { lease.release(); }
+  if (params.has('session')) return dashboard(req, res, params, message);
+  redirect(res, `/?message=${encodeURIComponent(message)}`);
+}
+
 async function handle(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const path = url.pathname;
@@ -311,6 +371,8 @@ async function handle(req, res) {
   let match = path.match(/^\/candidates\/([0-9a-f-]{36})\/(ignore|confirm|reopen)$/i);
   if (req.method === 'POST' && match && uuid.test(match[1])) return decision(req, res, match[1],
     { ignore: 'ignored', confirm: 'confirmed', reopen: 'needs_review' }[match[2]]);
+  match = path.match(/^\/jobs\/([0-9a-f-]{36})\/check$/i);
+  if (req.method === 'POST' && match && uuid.test(match[1])) return checkJobNow(req, res, match[1]);
   match = path.match(/^\/jobs\/([0-9a-f-]{36})\/stop$/i);
   if (req.method === 'POST' && match && uuid.test(match[1])) return stopJob(req, res, match[1]);
   if (req.method === 'POST' && path === '/cron/check') {

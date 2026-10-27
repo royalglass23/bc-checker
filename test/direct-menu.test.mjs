@@ -20,8 +20,10 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
   const originalQuery = pg.Pool.prototype.query;
   pg.Pool.prototype.query = async function (sql) {
     if (sql.includes('INSERT INTO used_events')) return { rowCount: 1, rows: [{ event_hash: 'used' }] };
-    if (sql.includes('count(*)::int')) return { rows: [{ total: 0 }] };
-    if (sql.includes('FROM monitored_jobs')) return { rows: [] };
+    if (sql.includes('count(*)::int')) return { rows: [{ total: 1 }] };
+    if (sql.includes('FROM monitored_jobs')) return { rows: [{ id: '33333333-3333-4333-8333-333333333333',
+      job_uuid: '44444444-4444-4444-8444-444444444444', job_number: 'R123',
+      job_address: '1 Example Street', baseline_complete: false, last_checked_at: null }] };
     if (sql.includes('FROM consent_candidates')) return { rows: [] };
     throw new Error(`Unexpected query: ${sql}`);
   };
@@ -41,6 +43,10 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs"/);
     assert.match(html, /href="https:\/\/bc-checker\.example\.test\/style\.css"/);
     assert.match(html, /name="session" value="[^"]+"/);
+    assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/check"/);
+    assert.match(html, /Check this address now/);
+    assert.ok(html.indexOf('class="pagination"') > html.indexOf('Job R123'));
+    assert.ok(html.indexOf('Jobs per page') > html.indexOf('Job R123'));
     assert.doesNotMatch(html, /Opening…|Open BC Checker|\/launch/);
 
     const session = html.match(/name="session" value="([^"]+)"/)?.[1];
