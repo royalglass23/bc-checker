@@ -50,10 +50,6 @@ async function bodyText(req, limit = 100_000) {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function cookie(req, name) {
-  return req.headers.cookie?.split(';').map(item => item.trim()).find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? '';
-}
-
 async function issueSession(identity, audience, ttlSeconds) {
   return new SignJWT({ accountUUID: identity.accountUUID, staffUUID: identity.staffUUID })
     .setProtectedHeader({ alg: 'HS256', typ: 'JWT' }).setIssuer('rg-bc-checker-addon')
@@ -70,8 +66,8 @@ async function verifySession(token, audience) {
     staffUUID: String(payload.staffUUID).toLowerCase(), jti: String(payload.jti) };
 }
 
-async function staff(req, res) {
-  try { return await verifySession(cookie(req, 'bc_session'), 'bc-checker-staff'); }
+async function staff(req, res, params) {
+  try { return await verifySession(params?.get('session'), 'bc-checker-staff'); }
   catch { respond(res, 401, '<h1>Session expired</h1><p>Open BC Checker from ServiceM8 again.</p>'); return null; }
 }
 
@@ -113,14 +109,19 @@ function page(title, body, dashboardScripts = false) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escape(title)} · RG BC Checker</title><link rel="stylesheet" href="/style.css"></head><body><main>${body}</main>${dashboardScripts ? '<script src="/xlsx.js" defer></script><script src="/app.js" defer></script>' : ''}</body></html>`;
 }
 
-function actionForm(path, label, csrf, extra = '') {
-  return `<form method="post" action="${escape(path)}"><input type="hidden" name="csrf" value="${csrf}">${extra}<button type="submit">${escape(label)}</button></form>`;
+function hiddenSession(session) {
+  return session ? `<input type="hidden" name="session" value="${escape(session)}">` : '';
 }
 
-async function dashboard(req, res) {
-  const identity = await staff(req, res);
+function actionForm(path, label, csrf, session = '', extra = '') {
+  return `<form method="post" action="${escape(path)}"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}${extra}<button type="submit">${escape(label)}</button></form>`;
+}
+
+async function dashboard(req, res, params, message) {
+  const identity = await staff(req, res, params);
   if (!identity) return;
-  const query = new URL(req.url, cfg.baseUrl).searchParams;
+  const query = params ?? new URL(req.url, cfg.baseUrl).searchParams;
+  const session = params?.get('session') ?? '';
   const count = await db.query('SELECT count(*)::int AS total FROM monitored_jobs WHERE account_uuid=$1 AND status=$2',
     [identity.accountUUID, 'active']);
   const total = count.rows[0].total;
@@ -143,9 +144,9 @@ async function dashboard(req, res) {
       ${row.description ? `<p>${escape(row.description)}</p>` : ''}
       <a href="${escape(row.source_url)}" target="_blank" rel="noopener noreferrer">View property source</a>
       <div class="actions">${row.decision === 'ignored'
-        ? actionForm(`/candidates/${row.id}/reopen`, 'Reopen for review', csrf)
-        : `${actionForm(`/candidates/${row.id}/ignore`, 'Wrong BC', csrf)}
-           ${actionForm(`/candidates/${row.id}/confirm`, 'Right BC — stop checking', csrf)}`}</div></li>`;
+        ? actionForm(`/candidates/${row.id}/reopen`, 'Reopen for review', csrf, session)
+        : `${actionForm(`/candidates/${row.id}/ignore`, 'Wrong BC', csrf, session)}
+           ${actionForm(`/candidates/${row.id}/confirm`, 'Right BC — stop checking', csrf, session)}`}</div></li>`;
     const events = rows.filter(row => row.decision !== 'ignored').map(renderCandidate).join('');
     const ignored = rows.filter(row => row.decision === 'ignored').map(renderCandidate).join('');
     return `<article class="job"><div class="job-head"><div><h2>Job ${escape(job.job_number)}</h2><p>${escape(job.job_address)}</p></div>
@@ -155,34 +156,36 @@ async function dashboard(req, res) {
       ${job.last_error ? `<br><span class="error">Check failed: ${escape(job.last_error)}</span>` : ''}</p>
       ${events ? `<ul>${events}</ul>` : `<p class="empty">No consent candidates recorded yet.</p>`}
       ${ignored ? `<details><summary>${rows.filter(row => row.decision === 'ignored').length} dismissed candidate(s)</summary><ul>${ignored}</ul></details>` : ''}
-      <details><summary>Stop monitoring this job</summary>${actionForm(`/jobs/${job.id}/stop`, 'Remove from monitoring', csrf)}</details>
+      <details><summary>Stop monitoring this job</summary>${actionForm(`/jobs/${job.id}/stop`, 'Remove from monitoring', csrf, session)}</details>
       </article>`;
   }).join('');
-  const flash = query.get('message');
-  const pageHref = number => `/?page=${number}&amp;size=${pageSize}`;
+  const flash = message ?? query.get('message');
+  const pageControl = (number, label, rel) => session
+    ? `<form method="post" action="/view"><input type="hidden" name="session" value="${escape(session)}"><input type="hidden" name="page" value="${number}"><input type="hidden" name="size" value="${pageSize}"><button type="submit">${label}</button></form>`
+    : `<a href="/?page=${number}&amp;size=${pageSize}" rel="${rel}">${label}</a>`;
   const html = page('Monitored jobs', `<header><p class="eyebrow">Royal Glass · ServiceM8 add-on</p><h1>BC Checker</h1>
-    <p>Track Auckland jobs every 14 days. Existing consents form a baseline; only newly seen candidates need review.</p></header>
+    <p>Track Auckland jobs every 14 days. Existing consents form a baseline; only newly seen candidates need review.</p>${session ? '<p>Use the surrounding ServiceM8 navigation to leave BC Checker.</p>' : ''}</header>
     ${flash ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
     <section class="add"><h2>Add jobs to monitor</h2><p>Enter job numbers or upload a CSV or XLSX export. Files can include a Job Number or Generated_Job_ID column.</p>
-    <form method="post" action="/jobs"><input type="hidden" name="csrf" value="${csrf}">
+    <form method="post" action="/jobs"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}
     <label for="jobNumbers">Job numbers</label><textarea id="jobNumbers" name="jobNumbers" rows="3" maxlength="20000" placeholder="One job number per line" required></textarea>
     <label for="jobFile">Or upload a list</label><input id="jobFile" type="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" aria-describedby="fileHelp">
     <p id="fileHelp" class="hint">CSV or XLSX · first worksheet · up to 50 jobs at a time</p>
     <p id="fileStatus" class="hint" role="status" aria-live="polite"></p>
     <button id="addJobsButton" type="submit">Add to monitoring</button></form></section>
     <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${total} active ${total === 1 ? 'job' : 'jobs'}</p></div>
-    <form method="get" action="/" class="page-size"><label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></div>
+    <form method="${session ? 'post' : 'get'}" action="${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></div>
     ${cards || '<p class="empty">No jobs are being monitored. Add a job number to start.</p>'}
-    ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? `<a href="${pageHref(currentPage - 1)}" rel="prev">Previous</a>` : ''}${currentPage < pageCount ? `<a href="${pageHref(currentPage + 1)}" rel="next">Next</a>` : ''}</div></nav>` : ''}</section>`, true);
+    ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div></nav>` : ''}</section>`, true);
   respond(res, 200, html, 'text/html; charset=utf-8', {
-    'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors https://*.servicem8.com",
   });
 }
 
 async function addJobs(req, res) {
-  const identity = await staff(req, res);
-  if (!identity) return;
   const params = new URLSearchParams(await bodyText(req, 25_000));
+  const identity = await staff(req, res, params);
+  if (!identity) return;
   checkForm(req, params, identity);
   const numbers = parseJobNumbers(params.get('jobNumbers'));
   if (numbers.length === 0 || numbers.length > 50) throw new Error('Enter 1–50 valid job numbers');
@@ -217,13 +220,14 @@ async function addJobs(req, res) {
     } catch { failures.push(number); }
   }
   const message = `${added} job${added === 1 ? '' : 's'} added.${failures.length ? ` Could not add: ${failures.join(', ').slice(0, 160)}.` : ''}`;
+  if (params.has('session')) return dashboard(req, res, params, message);
   redirect(res, `/?message=${encodeURIComponent(message)}`);
 }
 
 async function decision(req, res, candidateId, value) {
-  const identity = await staff(req, res);
-  if (!identity) return;
   const params = new URLSearchParams(await bodyText(req));
+  const identity = await staff(req, res, params);
+  if (!identity) return;
   checkForm(req, params, identity);
   const client = await db.connect();
   try {
@@ -242,17 +246,19 @@ async function decision(req, res, candidateId, value) {
   finally { client.release(); }
   const message = value === 'confirmed' ? 'Right BC recorded; job removed from monitoring.' :
     value === 'ignored' ? 'Wrong BC saved; monitoring continues.' : 'Candidate reopened for review.';
+  if (params.has('session')) return dashboard(req, res, params, message);
   redirect(res, `/?message=${encodeURIComponent(message)}`);
 }
 
 async function stopJob(req, res, jobId) {
-  const identity = await staff(req, res);
-  if (!identity) return;
   const params = new URLSearchParams(await bodyText(req));
+  const identity = await staff(req, res, params);
+  if (!identity) return;
   checkForm(req, params, identity);
   await db.query(`UPDATE monitored_jobs SET status='stopped', stopped_by_staff_uuid=$3,
     stopped_at=now() WHERE id=$1 AND account_uuid=$2 AND status='active'`,
   [jobId, identity.accountUUID, identity.staffUUID]);
+  if (params.has('session')) return dashboard(req, res, params, 'Job removed from monitoring.');
   redirect(res, '/?message=Job%20removed%20from%20monitoring.');
 }
 
@@ -286,9 +292,7 @@ async function handle(req, res) {
     try {
       const identity = await verifyEvent(await bodyText(req, 16_384));
       const token = await issueSession(identity, 'bc-checker-launch', 300);
-      const html = page('Open BC Checker', `<h1>RG BC Checker</h1><p>Open your monitored Job list.</p>
-        <form method="post" action="${escape(cfg.baseUrl)}/launch" target="_blank">
-        <input type="hidden" name="launch" value="${escape(token)}"><button type="submit">Open BC Checker</button></form>`);
+      const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>RG BC Checker</title></head><body><main><h1>Opening BC Checker…</h1><form id="bc-launch" method="post" action="${escape(cfg.baseUrl)}/launch"><input type="hidden" name="launch" value="${escape(token)}"><button type="submit">Open BC Checker</button></form></main><script>document.getElementById('bc-launch').submit()</script></body></html>`;
       return respond(res, 200, JSON.stringify({ eventResponse: html }), 'application/json');
     } catch { return respond(res, 401, JSON.stringify({ eventResponse: '<h1>BC Checker launch rejected</h1>' }), 'application/json'); }
   }
@@ -301,8 +305,12 @@ async function handle(req, res) {
       VALUES ($1, now() + interval '10 minutes') ON CONFLICT DO NOTHING RETURNING event_hash`, [launchHash]);
     if (consumed.rowCount !== 1) return respond(res, 409, 'This launch link was already used', 'text/plain');
     const token = await issueSession(identity, 'bc-checker-staff', 1800);
-    const secure = new URL(cfg.baseUrl).protocol === 'https:' ? '; Secure' : '';
-    return redirect(res, '/', { 'Set-Cookie': `bc_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=1800${secure}` });
+    return dashboard(req, res, new URLSearchParams({ session: token }));
+  }
+  if (req.method === 'POST' && path === '/view') {
+    if (req.headers.origin !== appOrigin) return respond(res, 403, 'Invalid request origin', 'text/plain');
+    const params = new URLSearchParams(await bodyText(req, 8_000));
+    return dashboard(req, res, params);
   }
   if (req.method === 'GET' && path === '/') return dashboard(req, res);
   if (req.method === 'POST' && path === '/jobs') return addJobs(req, res);

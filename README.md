@@ -11,6 +11,7 @@ Separate ServiceM8 Web Service Hosted Add-on for an Auckland-first, staff-manage
 - Re-adding a stopped Job starts a fresh baseline and clears that Job's old candidates. An already active Job is left unchanged.
 - Address matching must be unique. An uncertain address or changed ServiceM8 Job address produces a visible check error; it does not attach another property's events.
 - No email is sent. No ServiceM8 Job or Diary data is written.
+- The Add-ons menu launches BC Checker in ServiceM8's own add-on canvas. The signed staff session travels in the add-on's forms, including pagination and review actions; it does not require a separate browser tab or a third-party cookie.
 
 The Homes timeline labels these as consent events. The add-on presents them as **candidates**, and staff confirm whether one is the right building consent for the ServiceM8 Job. A matching address alone does not establish that conclusion.
 
@@ -28,11 +29,11 @@ No Vercel Cron Job is configured yet. Enabling it would start live Homes checks;
 2. Configure the names in `.env.example` as host secrets. Generate a random 32-byte base64 `TOKEN_ENCRYPTION_KEY`; use independent random 32-character-or-longer values for `SESSION_SECRET` and `CRON_SECRET`. The ServiceM8 App ID/Secret and database must be separate from Office Assistant and Company Check.
 3. Register a separate Web Service Hosted Add-on. The source manifest is `public/manifest.json`, served at `${APP_BASE_URL}/manifest.json`; its PNG icon is `public/icon.png`. Use `${APP_BASE_URL}/events` as event callback, `${APP_BASE_URL}/oauth/start` as activation URL, and `${APP_BASE_URL}/oauth/callback` as OAuth return URL. Grant only `vendor read_jobs`.
 4. Start with `npm start`. Configure a trusted scheduler to POST `${APP_BASE_URL}/cron/check` every **Monday at 9:00 am Pacific/Auckland**, with header `Authorization: Bearer <CRON_SECRET>`. The database due date selects each Job every second Monday after its first check. Each invocation processes at most ten due Jobs; if the list grows, call the endpoint repeatedly with suitable spacing or raise the bounded batch size after measuring run time.
-5. Verify one signed staff launch, a known Job with existing historical consents, a Job with no candidates, a newly appearing candidate, and the wrong/right BC controls before enabling regular checks. Keep the existing Address Check add-on's account-wide Homes rate budget in mind; this standalone add-on uses a 15-second gap between its own lookups but cannot coordinate that budget with another add-on.
+5. Verify that one signed staff launch remains inside the ServiceM8 canvas, including add, pagination, wrong/right BC and stop controls. Then verify a known Job with existing historical consents, a Job with no candidates, and a newly appearing candidate before enabling regular checks. Keep the existing Address Check add-on's account-wide Homes rate budget in mind; this standalone add-on uses a 15-second gap between its own lookups but cannot coordinate that budget with another add-on.
 
 The user stated that Royal Glass has written permission from Homes.co.nz covering scheduled commercial lookups. Retain that permission and its scope with the deployment record; the project does not include it.
 
 ## Local verification
 
-Run `npm test` for matching, CSV parsing, and candidate state rules. `node --check src/*.mjs` can be run on each file for syntax. Live ServiceM8 OAuth, signed menu launch, Homes data shape, scheduler timing, and database behaviour require staging verification with separate credentials and representative Jobs. No migration or outbound call was made in this local build.
+Run `npm test` for matching, CSV parsing, and candidate state rules. `node --check src/*.mjs` can be run on each file for syntax. Live ServiceM8 OAuth, embedded signed menu launch and navigation, Homes data shape, scheduler timing, and database behaviour require staging verification with separate credentials and representative Jobs. No migration or outbound call was made in this local build.
 # bc-checker
