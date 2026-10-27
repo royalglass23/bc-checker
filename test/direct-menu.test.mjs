@@ -24,7 +24,10 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     if (sql.includes('FROM monitored_jobs')) return { rows: [{ id: '33333333-3333-4333-8333-333333333333',
       job_uuid: '44444444-4444-4444-8444-444444444444', job_number: 'R123',
       job_address: '1 Example Street', baseline_complete: false, last_checked_at: null }] };
-    if (sql.includes('FROM consent_candidates')) return { rows: [] };
+    if (sql.includes('FROM consent_candidates')) return { rows: [{ id: '55555555-5555-4555-8555-555555555555',
+      monitored_job_id: '33333333-3333-4333-8333-333333333333', decision: 'needs_review',
+      consent_number: 'BC123', action: 'Issued', event_date: '2026-10-28',
+      source_url: 'https://homes.co.nz/' }] };
     throw new Error(`Unexpected query: ${sql}`);
   };
   const event = await new SignJWT({ eventVersion: '1.0', eventName: 'rg_bc_checker_menu',
@@ -44,9 +47,16 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /href="https:\/\/bc-checker\.example\.test\/style\.css"/);
     assert.match(html, /name="session" value="[^"]+"/);
     assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/check"/);
-    assert.match(html, /Check this address now/);
-    assert.ok(html.indexOf('class="pagination"') > html.indexOf('Job R123'));
-    assert.ok(html.indexOf('Jobs per page') > html.indexOf('Job R123'));
+    for (const heading of ['Job number', 'Address', 'Last checked', 'Status', 'Check now', 'Stop monitoring']) {
+      assert.match(html, new RegExp(`<th scope="col">${heading}</th>`));
+    }
+    assert.match(html, /<tbody><tr><th scope="row">R123<\/th>/);
+    assert.match(html, /Consent candidates for Job R123/);
+    assert.match(html, /BC123/);
+    assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/stop"/);
+    assert.doesNotMatch(html, /<details|<summary/);
+    assert.ok(html.indexOf('class="pagination"') > html.indexOf('</table>'));
+    assert.ok(html.indexOf('Jobs per page') > html.indexOf('</table>'));
     assert.doesNotMatch(html, /Opening…|Open BC Checker|\/launch/);
 
     const session = html.match(/name="session" value="([^"]+)"/)?.[1];
