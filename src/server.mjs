@@ -83,24 +83,31 @@ function checkForm(params, identity) {
 }
 
 async function verifyEvent(token) {
-  if (!token || token.length > 16_384 || token.split('.').length !== 3) throw new Error('Invalid launch');
+  if (!token || token.length > 16_384 || token.split('.').length !== 3) throw new Error('Invalid launch token format');
   const { payload, protectedHeader } = await jwtVerify(token, new TextEncoder().encode(cfg.appSecret),
     { algorithms: ['HS256'], clockTolerance: 30 });
-  if (protectedHeader.alg !== 'HS256' || payload.eventVersion !== '1.0' ||
-    String(payload.eventName).toLowerCase() !== 'rg_bc_checker_menu' ||
-    !uuid.test(String(payload.auth?.accountUUID)) || !uuid.test(String(payload.auth?.staffUUID)) ||
-    String(payload.auth.accountUUID).toLowerCase() !== cfg.allowedAccountUUID ||
-    !(Array.isArray(payload.eventArgs) && payload.eventArgs.length === 0 ||
+  if (protectedHeader.alg !== 'HS256') throw new Error('Invalid launch algorithm');
+  if (payload.eventVersion !== '1.0') throw new Error('Invalid launch event version');
+  if (String(payload.eventName).toLowerCase() !== 'rg_bc_checker_menu') throw new Error('Invalid launch event name');
+  if (!uuid.test(String(payload.auth?.accountUUID))) throw new Error('Invalid launch account UUID');
+  if (!uuid.test(String(payload.auth?.staffUUID))) throw new Error('Invalid launch staff UUID');
+  if (String(payload.auth.accountUUID).toLowerCase() !== cfg.allowedAccountUUID) throw new Error('Launch account is not allowed');
+  if (!(payload.eventArgs == null ||
+      Array.isArray(payload.eventArgs) && payload.eventArgs.length === 0 ||
       payload.eventArgs && typeof payload.eventArgs === 'object' &&
-      !Array.isArray(payload.eventArgs) && Object.keys(payload.eventArgs).length === 0) ||
-    !Number.isInteger(payload.iat) || !payload.jti ||
-    Date.now() / 1000 - payload.iat > 300 || payload.iat - Date.now() / 1000 > 30) {
-    throw new Error('Invalid launch');
+      !Array.isArray(payload.eventArgs) && Object.keys(payload.eventArgs).length === 0)) throw new Error('Invalid launch event arguments');
+  if (payload.iat !== undefined && (!Number.isInteger(payload.iat) ||
+      Date.now() / 1000 - payload.iat > 300 || payload.iat - Date.now() / 1000 > 30)) {
+    throw new Error('Launch event is outside allowed time window');
   }
-  const eventHash = createHash('sha256').update(`${payload.auth.accountUUID}:${payload.jti}`).digest('hex');
-  const used = await db.query(`INSERT INTO used_events (event_hash, expires_at)
-    VALUES ($1, now() + interval '10 minutes') ON CONFLICT DO NOTHING RETURNING event_hash`, [eventHash]);
-  if (used.rowCount !== 1) throw new Error('Launch was already used');
+  // ServiceM8 does not document iat or jti on menu events. A signed event
+  // without them may be identical on every legitimate click.
+  if (Number.isInteger(payload.iat) && typeof payload.jti === 'string' && payload.jti) {
+    const eventHash = createHash('sha256').update(`${payload.auth.accountUUID}:${payload.jti}`).digest('hex');
+    const used = await db.query(`INSERT INTO used_events (event_hash, expires_at)
+      VALUES ($1, now() + interval '10 minutes') ON CONFLICT DO NOTHING RETURNING event_hash`, [eventHash]);
+    if (used.rowCount !== 1) throw new Error('Launch was already used');
+  }
   return { accountUUID: String(payload.auth.accountUUID).toLowerCase(),
     staffUUID: String(payload.auth.staffUUID).toLowerCase() };
 }
@@ -356,21 +363,47 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/oauth/callback') {
     const state = url.searchParams.get('state') ?? '';
     const code = url.searchParams.get('code') ?? '';
-    if (state.length < 32 || code.length < 1 || !await consumeOAuthState(cfg, state)) throw new Error('OAuth state is invalid');
-    const tokens = await exchangeCode(cfg, code);
-    const account = await vendorUUID(tokens.access);
-    if (account !== cfg.allowedAccountUUID) return respond(res, 403, 'This ServiceM8 account is not authorised');
-    await saveConnection(cfg, account, tokens);
-    return redirect(res, 'https://go.servicem8.com/');
+    let stage = 'validate_state';
+    try {
+      if (state.length < 32 || !await consumeOAuthState(cfg, state)) throw new Error('OAuth state is invalid');
+      stage = 'oauth_response';
+      if (url.searchParams.has('error')) {
+        const reason = url.searchParams.get('error');
+        console.warn('BC Checker OAuth access denied', { reason: reason === 'access_denied' ? reason : 'other' });
+        return respond(res, reason === 'access_denied' ? 403 : 400,
+          reason === 'access_denied' ? 'BC Checker access was not granted in ServiceM8.' : 'BC Checker authorisation failed in ServiceM8.');
+      }
+      if (!code) throw new Error('OAuth code is missing');
+      stage = 'exchange_code';
+      const tokens = await exchangeCode(cfg, code);
+      stage = 'verify_account';
+      const account = await vendorUUID(tokens.access);
+      if (account !== cfg.allowedAccountUUID) return respond(res, 403, 'This ServiceM8 account is not authorised');
+      stage = 'save_connection';
+      await saveConnection(cfg, account, tokens);
+      return redirect(res, 'https://go.servicem8.com/');
+    } catch (error) {
+      console.error('BC Checker OAuth callback failed', { stage,
+        error: error instanceof Error ? error.message : 'Unknown error' });
+      return respond(res, stage === 'validate_state' || stage === 'oauth_response' ? 400 : 500,
+        'BC Checker could not complete authorisation. Please try again.');
+    }
   }
   if (req.method === 'POST' && path === '/events') {
+    let stage = 'verify_event';
     try {
       const identity = await verifyEvent(await bodyText(req, 16_384));
+      stage = 'issue_session';
       const session = await issueSession(identity, 'bc-checker-staff', 1800);
       const staffIdentity = await verifySession(session, 'bc-checker-staff');
+      stage = 'render_dashboard';
       const html = await renderDashboard(staffIdentity, session, new URLSearchParams(), null, true);
       return respond(res, 200, JSON.stringify({ eventResponse: html }), 'application/json');
-    } catch { return respond(res, 401, JSON.stringify({ eventResponse: '<h1>BC Checker launch rejected</h1>' }), 'application/json'); }
+    } catch (error) {
+      console.error('BC Checker launch failed', { stage,
+        error: error instanceof Error ? error.message : 'Unknown error' });
+      return respond(res, 401, JSON.stringify({ eventResponse: '<h1>BC Checker launch rejected</h1>' }), 'application/json');
+    }
   }
   if (req.method === 'POST' && path === '/view') {
     const params = new URLSearchParams(await bodyText(req, 8_000));
@@ -397,7 +430,8 @@ async function handle(req, res) {
 
 export const requestListener = (req, res) => {
   handle(req, res).catch(error => {
-    console.error('BC Checker request failed', { path: req.url, error: error instanceof Error ? error.message : 'Unknown error' });
+    console.error('BC Checker request failed', { path: new URL(req.url, 'http://localhost').pathname,
+      error: error instanceof Error ? error.message : 'Unknown error' });
     if (!res.headersSent) respond(res, 500, 'BC Checker could not complete the request. Please try again.', 'text/plain');
     else res.end();
   });
