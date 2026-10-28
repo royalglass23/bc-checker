@@ -118,8 +118,8 @@ ul { list-style: none; padding: 0; }
 .candidate-trigger:hover { background: var(--surface-subtle); }
 .candidate-trigger strong, .candidate-trigger .pill { flex: none; }
 .candidate-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.candidate-hint { margin-left: auto; flex: none; color: var(--brand); font-size: .85rem; }
 .candidate-dialog { width: min(600px, calc(100vw - 32px)); max-height: min(80vh, 720px); padding: 22px; border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: var(--shadow); color: var(--text); }
+.candidate-dialog.candidate-preview { position: fixed; top: 50%; left: 50%; margin: 0; transform: translate(-50%, -50%); z-index: 100; pointer-events: none; box-shadow: 0 0 0 100vmax rgb(16 43 58 / 35%), var(--shadow); }
 .candidate-dialog::backdrop { background: rgb(16 43 58 / 35%); }
 .candidate-dialog-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
 .candidate-dialog h4 { margin: 0; font-size: 1.15rem; }
@@ -153,7 +153,6 @@ summary { cursor: pointer; color: var(--text-secondary); }
   .top-panels { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
-  .candidate-hint { display: none; }
   main { padding: 20px 16px 60px; }
   .top-panels { gap: 16px; margin-bottom: 24px; }
   header { padding: 24px; }
