@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyEvent, consentEvents, consentIdentity, isIssued, jobPage, latestConsentEvents, selectExactProperty } from '../src/domain.mjs';
+import { classifyEvent, consentEvents, consentIdentity, isIssued, jobPage, latestConsentEvents, parseJobNumbers, selectExactProperty } from '../src/domain.mjs';
+
+test('manual job numbers accept commas, trim spaces and reject invalid lists', () => {
+  assert.deepEqual(parseJobNumbers('  R123  , R124 , R123  '), ['R123', 'R124']);
+  assert.deepEqual(parseJobNumbers('R123\nR124\r\n'), ['R123', 'R124']);
+  assert.throws(() => parseJobNumbers('R123, !'), /separated by commas/);
+  assert.throws(() => parseJobNumbers(Array.from({ length: 51 }, (_, i) => `R${i}`).join(', ')), /1–50/);
+});
 
 test('monitored jobs default to five per page and clamp page requests', () => {
   assert.deepEqual(jobPage(null, null, 12), { size: 5, pages: 3, page: 1, offset: 0 });

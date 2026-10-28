@@ -21,11 +21,17 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
   const searches = [];
   pg.Pool.prototype.query = async function (sql, params) {
     if (sql.includes('INSERT INTO used_events')) return { rowCount: 1, rows: [{ event_hash: 'used' }] };
+    if (sql.includes('INSERT INTO checker_audit_events') || sql.includes('UPDATE checker_audit_events')) return { rowCount: 1, rows: [] };
+    if (sql.includes('FROM checker_audit_events')) return { rows: [{ event_type: 'job_stopped',
+      job_number: 'R122', staff_uuid: '22222222-2222-4222-8222-222222222222',
+      staff_name: 'Michael Example', outcome: 'success', detail: '',
+      created_at: '2026-10-28T00:00:00Z' }] };
     if (sql.includes('FROM monitored_jobs')) searches.push(params?.[2]);
     if (sql.includes('count(*)::int')) return { rows: [{ total: 1 }] };
     if (sql.includes('FROM monitored_jobs')) return { rows: [{ id: '33333333-3333-4333-8333-333333333333',
       job_uuid: '44444444-4444-4444-8444-444444444444', job_number: 'R123',
       job_address: '1 Example Street', client_name: 'Example Client', baseline_complete: false, last_checked_at: null }] };
+    if (sql.includes('SELECT scope FROM oauth_connections')) return { rows: [{ scope: 'vendor read_jobs read_customers manage_jobs publish_diary_items' }] };
     if (sql.includes('FROM consent_candidates')) return { rows: [{ id: '55555555-5555-4555-8555-555555555555',
       monitored_job_id: '33333333-3333-4333-8333-333333333333', decision: 'needs_review',
       consent_number: 'BC123', action: 'Issued', event_date: '2026-10-28',
@@ -59,13 +65,18 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /class="icon-button check" type="submit" aria-label="Check now Job R123"/);
     assert.match(html, /id="checkJobLoading" class="job-dialog"/);
     assert.match(html, /class="icon-button stop" type="submit" aria-label="Stop monitoring Job R123"/);
-    assert.match(html, /<label for="jobNumber">Job number<\/label>/);
-    assert.match(html, /name="jobNumber" type="text"/);
-    assert.match(html, /Add Job/);
+    assert.match(html, /<label for="jobNumbers">Job numbers<\/label>/);
+    assert.match(html, /name="jobNumbers" rows="4"/);
+    assert.match(html, /Separate ServiceM8 job numbers with commas/);
+    assert.match(html, /R123, R124, R125/);
+    assert.match(html, /Add Jobs/);
     assert.doesNotMatch(html, /jobFile|xlsx\.js|CSV or XLSX/);
     assert.match(html, /id="jobSearch"/);
     assert.match(html, /Consent candidates for Job R123/);
     assert.match(html, /BC123/);
+    assert.match(html, /Recent checker activity/);
+    assert.match(html, /Stopped monitoring/);
+    assert.match(html, /Michael Example/);
     assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/stop"/);
     assert.doesNotMatch(html, /<details|<summary/);
     assert.ok(html.indexOf('class="pagination"') > html.indexOf('</table>'));
@@ -80,14 +91,14 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     try {
       const add = await fetch(`${base}/jobs`, { method: 'POST',
         headers: { Origin: 'null', 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ session, csrf, jobNumber: 'R123\nR124' }),
+        body: new URLSearchParams({ session, csrf, jobNumbers: 'R123, !' }),
       });
       assert.equal(add.status, 200);
-      assert.equal(errors.at(-1)?.[1]?.error, 'Enter one valid job number');
+      assert.equal(errors.at(-1)?.[1]?.error, 'Enter 1–50 valid job numbers separated by commas');
       const addHtml = await add.text();
       assert.match(addHtml, /id="addJobsResult" class="job-dialog error"/);
-      assert.match(addHtml, /Job not added/);
-      assert.match(addHtml, /Enter one valid job number/);
+      assert.match(addHtml, /Jobs not added/);
+      assert.match(addHtml, /Enter 1–50 valid job numbers separated by commas/);
       assert.match(addHtml, /id="addJobsLoading" class="job-dialog"/);
     } finally { console.error = originalError; }
     const view = await fetch(`${base}/view`, { method: 'POST',
@@ -95,7 +106,7 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     });
     assert.equal(view.status, 200);
     assert.match(await view.text(), /<h1>BC Checker<\/h1>/);
-    for (const [kind, heading] of [['success', 'Job added'], ['error', 'Job not added']]) {
+    for (const [kind, heading] of [['success', 'Jobs added'], ['partial', 'Some jobs could not be added'], ['error', 'Jobs not added']]) {
       const resultView = await fetch(`${base}/view`, { method: 'POST',
         body: new URLSearchParams({ session, addResult: '1 job added.', addKind: kind }),
       });
@@ -115,6 +126,11 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
       assert.match(resultHtml, /id="checkJobResult"/);
       assert.match(resultHtml, /Address checked\./);
     }
+    const missingStaffScope = await fetch(`${base}/jobs/33333333-3333-4333-8333-333333333333/check`, {
+      method: 'POST', body: new URLSearchParams({ session, csrf }),
+    });
+    assert.equal(missingStaffScope.status, 200);
+    assert.match(await missingStaffScope.text(), /Reconnect BC Checker in ServiceM8 to enable staff attribution/);
     const filtered = await fetch(`${base}/view`, { method: 'POST',
       body: new URLSearchParams({ session, search: 'Exam', page: '1' }),
     });

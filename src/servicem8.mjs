@@ -3,7 +3,7 @@ import { database, seal, unseal } from './db.mjs';
 
 const api = 'https://api.servicem8.com/api_1.0';
 const tokenUrl = 'https://go.servicem8.com/oauth/access_token';
-export const scopes = 'vendor read_jobs read_customers manage_jobs publish_diary_items';
+export const scopes = 'vendor read_jobs read_customers read_staff manage_jobs publish_diary_items';
 const readScopes = ['vendor', 'read_jobs', 'read_customers'];
 
 export function oauthAuthorizeUrl(cfg, state) {
@@ -92,17 +92,28 @@ export async function serviceM8Get(token, path) {
   return response.json();
 }
 
-async function serviceM8Post(token, path, body) {
+async function serviceM8Post(token, path, body, staffUUID = null) {
   const response = await fetch(`${api}${path}`, { method: 'POST', headers: {
     Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json',
+    ...(staffUUID ? { 'x-impersonate-uuid': staffUUID } : {}),
   }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`ServiceM8 write returned ${response.status}`);
   return response;
 }
 
-export async function addDiaryItem(token, jobUUID, content) {
+export async function addDiaryItem(token, jobUUID, content, staffUUID) {
   if (content.length > 1000) throw new Error('Diary item is too long');
-  return serviceM8Post(token, '/diary.json', { job_uuid: jobUUID, content });
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(staffUUID)) {
+    throw new Error('A verified staff identity is required for Diary attribution');
+  }
+  return serviceM8Post(token, '/diary.json', { job_uuid: jobUUID, content }, staffUUID);
+}
+
+export async function getStaffName(token, staffUUID) {
+  const staff = await serviceM8Get(token, `/staff/${encodeURIComponent(staffUUID)}.json`);
+  const name = `${String(staff.first ?? '').trim()} ${String(staff.last ?? '').trim()}`.trim().replace(/\s+/g, ' ');
+  if (!name) throw new Error('ServiceM8 staff name is unavailable');
+  return name.slice(0, 80);
 }
 
 export async function vendorUUID(token) {

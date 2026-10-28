@@ -32,7 +32,8 @@ test('OAuth denial is reported without leaking its state, and launch failures id
     }
     if (failDashboard && sql.includes('FROM monitored_jobs')) throw new Error('monitored_jobs table is unavailable');
     if (sql.includes('count(*)::int')) return { rows: [{ total: 0 }] };
-    if (sql.includes('FROM monitored_jobs') || sql.includes('FROM consent_candidates')) return { rows: [] };
+    if (sql.includes('FROM monitored_jobs') || sql.includes('FROM consent_candidates') ||
+        sql.includes('FROM checker_audit_events')) return { rows: [] };
     throw new Error(`Unexpected query: ${sql}`);
   };
   console.error = (...args) => logs.push(['error', ...args]);

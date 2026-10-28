@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { finishAudit, recordAudit } from './audit.mjs';
 import { bcStatus } from './bc-note.mjs';
 import { database } from './db.mjs';
 import { classifyEvent, consentIdentity, isIssued, latestConsentEvents, normaliseAddress } from './domain.mjs';
@@ -74,14 +75,22 @@ export async function runDueChecks(cfg, options = {}) {
     for (let i = 0; i < due.rows.length; i++) {
       const row = due.rows[i];
       if (i > 0) await new Promise(resolve => setTimeout(resolve, 15_000));
+      const auditId = await recordAudit(db, { accountUUID: row.account_uuid, jobUUID: row.job_uuid,
+        jobNumber: row.job_number, type: 'scheduled_check', outcome: 'started' });
       try {
         const outcome = await checker(cfg, row);
+        await finishAudit(db, auditId, outcome.skipped ? 'skipped' : 'success',
+          outcome.skipped ? 'Job no longer monitored' : `${outcome.events} consent events; ${outcome.newCandidates} new candidates`)
+          .catch(error => console.error('BC Checker scheduled audit could not be completed', {
+            auditId, error: error instanceof Error ? error.message : 'Unknown error',
+          }));
         result.push({ jobNumber: row.job_number, ...outcome });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown check error';
         await db.query(`UPDATE monitored_jobs SET last_checked_at=now(),
           next_check_at=now() + interval '6 days', last_error=$2 WHERE id=$1 AND status='active'`,
         [row.id, message.slice(0, 250)]);
+        await finishAudit(db, auditId, 'failed', message);
         result.push({ jobNumber: row.job_number, error: message });
       }
     }

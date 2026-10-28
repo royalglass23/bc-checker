@@ -62,3 +62,22 @@ CREATE TABLE IF NOT EXISTS consent_candidates (
 );
 
 CREATE INDEX IF NOT EXISTS consent_candidates_job_idx ON consent_candidates (monitored_job_id);
+
+CREATE TABLE IF NOT EXISTS checker_audit_events (
+  id uuid PRIMARY KEY,
+  account_uuid uuid NOT NULL,
+  job_uuid uuid,
+  job_number text NOT NULL DEFAULT '',
+  event_type text NOT NULL CHECK (event_type IN
+    ('job_added', 'job_add_attempt', 'job_stopped', 'manual_check', 'scheduled_check',
+     'bc_ignored', 'bc_confirmed', 'bc_reopened')),
+  staff_uuid uuid,
+  staff_name text NOT NULL DEFAULT '',
+  outcome text NOT NULL CHECK (outcome IN ('started', 'success', 'partial', 'failed', 'skipped')),
+  detail text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  completed_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS checker_audit_events_account_time_idx
+  ON checker_audit_events (account_uuid, created_at DESC);
