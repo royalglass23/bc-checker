@@ -13,22 +13,31 @@ export function checkedDate(now = new Date()) {
 }
 
 export function bcStatus(events, now = new Date()) {
+  return bcAssessment(events, now).status;
+}
+
+export function bcAssessment(events, now = new Date()) {
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-NZ', { timeZone: 'Pacific/Auckland',
     year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(now)
     .filter(part => part.type !== 'literal').map(part => [part.type, Number(part.value)]));
   const today = new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
   const cutoff = new Date(today);
   cutoff.setUTCFullYear(cutoff.getUTCFullYear() - 3);
-  const recent = latestConsentEvents(events).filter(event => {
+  const buildingConsents = latestConsentEvents(events).filter(event => {
     const evidence = [event.kind, event.number, event.action, event.description].filter(Boolean).join(' ').replaceAll('_', ' ');
     const bc = /\b(building consent|building permit)\b|\bBC(?:[-\s/:]*\d+|\b)/i.test(evidence);
     const rc = /\b(resource consent|planning consent)\b|\bRC(?:[-\s/:]*\d+|\b)/i.test(evidence);
     const date = new Date(String(event.date).slice(0, 10));
-    return bc && !rc && Number.isFinite(date.getTime()) && date >= cutoff && date <= today;
+    return bc && !rc && Number.isFinite(date.getTime()) && date <= today;
   }).sort((a, b) => Date.parse(b.date) - Date.parse(a.date));
-  return recent.length
-    ? `BC - ${recent[0].number || 'Number unavailable'} - ${checkedDate(now)}`
-    : `NO BC - ${checkedDate(now)}`;
+  const recent = buildingConsents.find(event => new Date(String(event.date).slice(0, 10)) >= cutoff);
+  const older = buildingConsents.find(event => new Date(String(event.date).slice(0, 10)) < cutoff);
+  return {
+    status: recent
+      ? `BC - ${recent.number || 'Number unavailable'} - ${checkedDate(now)}`
+      : `NO BC - ${checkedDate(now)}`,
+    older,
+  };
 }
 
 export function mergeBcStatus(existing, status) {

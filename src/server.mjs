@@ -456,8 +456,12 @@ async function stopJob(req, res, jobId) {
   redirect(res, `/?stopResult=${encodeURIComponent(message)}&stopKind=${kind}`);
 }
 
-export function manualCheckDiaryContent(job, outcome, actorName, date) {
-  return `BC Checker address check — ${date}\nChecked by: ${actorName}\nJob ${job.job_number}: ${outcome.matchedAddress || job.job_address}\n${outcome.events} consent event(s) found; ${outcome.firstCheck ? 'first check baseline recorded' : `${outcome.newCandidates} new candidate(s) to review`}. Address results are candidates until staff confirm the right BC.\nSource: ${outcome.sourceUrl}`.slice(0, 1000);
+export function manualCheckDiaryContent(job, outcome, date) {
+  const older = outcome.olderBuildingConsent;
+  const historicalNote = older
+    ? `Historical BC ${older.number || 'number unavailable'} (${String(older.date).slice(0, 10)}) is more than 3 years old and is excluded from the current Job Note result.\n`
+    : '';
+  return `BC Checker address check — ${date}\nJob ${job.job_number}: ${outcome.matchedAddress || job.job_address}\n${outcome.events} consent event(s) found; ${outcome.firstCheck ? 'first check baseline recorded' : `${outcome.newCandidates} new candidate(s) to review`}.\nJob Note result: ${outcome.noteStatus}\n${historicalNote}The property timeline is an address match only; staff should confirm whether any consent relates to this Job.\nSource: ${outcome.sourceUrl}`.slice(0, 1000);
 }
 
 async function checkJobNow(req, res, jobId) {
@@ -485,7 +489,7 @@ async function checkJobNow(req, res, jobId) {
       message = 'Reconnect BC Checker in ServiceM8 to enable staff attribution, Job Note field and Diary updates.';
     } else {
       const token = await accessToken(cfg, identity.accountUUID);
-      const actorName = await getStaffName(token, identity.staffUUID);
+      await getStaffName(token, identity.staffUUID);
       const lease = await db.connect();
       try {
         const lockKey = `bc-checker-manual:${jobId}`;
@@ -503,14 +507,14 @@ async function checkJobNow(req, res, jobId) {
               message = 'This job is no longer being monitored.';
             } else {
               const date = new Date().toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' });
-              const content = manualCheckDiaryContent(job, outcome, actorName, date);
+              const content = manualCheckDiaryContent(job, outcome, date);
               let noteSaved = false;
               try {
                 await updateJobNoteField(token, job.job_uuid, current => mergeBcStatus(current, outcome.noteStatus));
                 noteSaved = true;
                 await addDiaryItem(token, job.job_uuid, content, identity.staffUUID);
                 auditOutcome = 'success';
-                message = `Address checked by ${actorName}. ${outcome.events} consent event(s) found. Note field updated; one Diary entry added.`;
+                message = `Address checked. ${outcome.events} consent event(s) found. Note field updated; one Diary entry added.`;
               } catch (error) {
                 kind = 'error';
                 auditOutcome = 'partial';
