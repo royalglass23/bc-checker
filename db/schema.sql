@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS consent_candidates (
   description text NOT NULL DEFAULT '',
   source_url text NOT NULL DEFAULT '',
   was_issued boolean NOT NULL DEFAULT false,
-  decision text NOT NULL CHECK (decision IN ('baseline', 'needs_review', 'ignored', 'confirmed')),
+  decision text NOT NULL CHECK (decision IN ('baseline', 'needs_review', 'ignored', 'confirmed', 'deleted')),
   first_seen_at timestamptz NOT NULL DEFAULT now(),
   last_seen_at timestamptz NOT NULL DEFAULT now(),
   decided_by_staff_uuid uuid,
@@ -63,6 +63,10 @@ CREATE TABLE IF NOT EXISTS consent_candidates (
 
 CREATE INDEX IF NOT EXISTS consent_candidates_job_idx ON consent_candidates (monitored_job_id);
 
+ALTER TABLE consent_candidates DROP CONSTRAINT IF EXISTS consent_candidates_decision_check;
+ALTER TABLE consent_candidates ADD CONSTRAINT consent_candidates_decision_check
+  CHECK (decision IN ('baseline', 'needs_review', 'ignored', 'confirmed', 'deleted'));
+
 CREATE TABLE IF NOT EXISTS checker_audit_events (
   id uuid PRIMARY KEY,
   account_uuid uuid NOT NULL,
@@ -70,7 +74,7 @@ CREATE TABLE IF NOT EXISTS checker_audit_events (
   job_number text NOT NULL DEFAULT '',
   event_type text NOT NULL CHECK (event_type IN
     ('job_added', 'job_add_attempt', 'job_stopped', 'manual_check', 'scheduled_check',
-     'bc_ignored', 'bc_confirmed', 'bc_reopened')),
+     'bc_ignored', 'bc_confirmed', 'bc_reopened', 'bc_deleted')),
   staff_uuid uuid,
   staff_name text NOT NULL DEFAULT '',
   outcome text NOT NULL CHECK (outcome IN ('started', 'success', 'partial', 'failed', 'skipped')),
@@ -81,3 +85,8 @@ CREATE TABLE IF NOT EXISTS checker_audit_events (
 
 CREATE INDEX IF NOT EXISTS checker_audit_events_account_time_idx
   ON checker_audit_events (account_uuid, created_at DESC);
+
+ALTER TABLE checker_audit_events DROP CONSTRAINT IF EXISTS checker_audit_events_event_type_check;
+ALTER TABLE checker_audit_events ADD CONSTRAINT checker_audit_events_event_type_check
+  CHECK (event_type IN ('job_added', 'job_add_attempt', 'job_stopped', 'manual_check', 'scheduled_check',
+    'bc_ignored', 'bc_confirmed', 'bc_reopened', 'bc_deleted'));

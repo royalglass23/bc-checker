@@ -189,7 +189,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     ORDER BY created_at DESC, id DESC LIMIT $4 OFFSET $5`,
     [identity.accountUUID, 'active', term, pageSize, offset]);
   const candidates = await db.query(`SELECT c.* FROM consent_candidates c JOIN monitored_jobs j ON j.id=c.monitored_job_id
-    WHERE j.account_uuid=$1 AND j.status='active' AND j.id=ANY($2::uuid[])
+    WHERE j.account_uuid=$1 AND j.status='active' AND j.id=ANY($2::uuid[]) AND c.decision <> 'deleted'
     ORDER BY c.first_seen_at DESC`, [identity.accountUUID, jobs.rows.map(job => job.id)]);
   const byJob = Map.groupBy(candidates.rows, row => row.monitored_job_id);
   const staffNames = await activityStaffNames(identity);
@@ -199,21 +199,27 @@ async function renderDashboard(identity, session, query, message, embedded = fal
   const auditLabels = {
     job_added: 'Job added', job_add_attempt: 'Add job', job_stopped: 'Stopped monitoring',
     manual_check: 'Check now', scheduled_check: 'Scheduled check', bc_ignored: 'Wrong BC',
-    bc_confirmed: 'Right BC; stopped monitoring', bc_reopened: 'Reopened BC',
+    bc_confirmed: 'Right BC; stopped monitoring', bc_reopened: 'Reopened BC', bc_deleted: 'Deleted BC candidate',
   };
   const csrf = csrfFor(identity);
   const jobViews = jobs.rows.map(job => {
     const rows = byJob.get(job.id) ?? [];
     const review = rows.filter(row => row.decision === 'needs_review').length;
     const renderCandidate = row => `<li class="candidate ${escape(row.decision)}">
-      <div><strong>${escape(row.consent_number || 'Number unavailable')}</strong> · ${escape(row.action || 'Status unclear')} · ${escape(row.event_date || 'Date unavailable')}
-      <span class="pill">${escape(row.decision.replace('_', ' '))}</span></div>
-      ${row.description ? `<p>${escape(row.description)}</p>` : ''}
+      <button type="button" class="candidate-trigger" data-candidate-dialog="candidate-${escape(row.id)}" aria-haspopup="dialog" aria-controls="candidate-${escape(row.id)}">
+        <strong>${escape(row.consent_number || 'Number unavailable')}</strong><span class="candidate-summary">${escape(row.action || 'Status unclear')} · ${escape(row.event_date || 'Date unavailable')}</span>
+        <span class="pill">${escape(row.decision.replace('_', ' '))}</span><span class="candidate-hint">View details</span>
+      </button>
+      <dialog id="candidate-${escape(row.id)}" class="candidate-dialog" aria-labelledby="candidate-title-${escape(row.id)}">
+      <div class="candidate-dialog-heading"><h4 id="candidate-title-${escape(row.id)}">Consent ${escape(row.consent_number || 'number unavailable')}</h4><button type="button" class="candidate-close" aria-label="Close consent details">×</button></div>
+      <p><strong>Job:</strong> ${escape(job.job_number)}</p><p><strong>Action:</strong> ${escape(row.action || 'Status unclear')}</p><p><strong>Date:</strong> ${escape(row.event_date || 'Date unavailable')}</p>
+      ${row.description ? `<p class="candidate-description">${escape(row.description)}</p>` : ''}
       <a href="${escape(row.source_url)}" target="_blank" rel="noopener noreferrer">View property source</a>
       <div class="actions">${row.decision === 'ignored'
         ? actionForm(`/candidates/${row.id}/reopen`, 'Reopen for review', csrf, session, origin)
         : `${actionForm(`/candidates/${row.id}/ignore`, 'Wrong BC', csrf, session, origin)}
-           ${actionForm(`/candidates/${row.id}/confirm`, 'Right BC — stop checking', csrf, session, origin)}`}</div></li>`;
+           ${actionForm(`/candidates/${row.id}/confirm`, 'Right BC — stop checking', csrf, session, origin)}`}
+        ${actionForm(`/candidates/${row.id}/delete`, 'Delete candidate', csrf, session, origin)}</div></dialog></li>`;
     const status = review ? `${review} to review` : job.baseline_complete ? 'Monitoring' : 'Waiting for first check';
     const lastChecked = job.last_checked_at
       ? escape(new Date(job.last_checked_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' })) : 'Never';
@@ -395,13 +401,15 @@ async function decision(req, res, candidateId, value) {
     await recordAudit(client, { accountUUID: identity.accountUUID, jobUUID: candidate.rows[0].job_uuid,
       jobNumber: candidate.rows[0].job_number, type: {
         ignored: 'bc_ignored', confirmed: 'bc_confirmed', needs_review: 'bc_reopened',
+        deleted: 'bc_deleted',
       }[value], staffUUID: identity.staffUUID, staffName: actorName, outcome: 'success',
       detail: candidate.rows[0].consent_number ? `BC ${candidate.rows[0].consent_number}` : 'Consent candidate' });
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
   const message = value === 'confirmed' ? 'Right BC recorded; job removed from monitoring.' :
-    value === 'ignored' ? 'Wrong BC saved; monitoring continues.' : 'Candidate reopened for review.';
+    value === 'ignored' ? 'Wrong BC saved; monitoring continues.' :
+    value === 'deleted' ? 'Candidate deleted; it will stay hidden on future checks.' : 'Candidate reopened for review.';
   if (params.has('session')) return dashboard(req, res, params, message);
   redirect(res, `/?message=${encodeURIComponent(message)}`);
 }
@@ -592,9 +600,9 @@ async function handle(req, res) {
   }
   if (req.method === 'GET' && path === '/') return dashboard(req, res);
   if (req.method === 'POST' && path === '/jobs') return addJobs(req, res);
-  let match = path.match(/^\/candidates\/([0-9a-f-]{36})\/(ignore|confirm|reopen)$/i);
+  let match = path.match(/^\/candidates\/([0-9a-f-]{36})\/(ignore|confirm|reopen|delete)$/i);
   if (req.method === 'POST' && match && uuid.test(match[1])) return decision(req, res, match[1],
-    { ignore: 'ignored', confirm: 'confirmed', reopen: 'needs_review' }[match[2]]);
+    { ignore: 'ignored', confirm: 'confirmed', reopen: 'needs_review', delete: 'deleted' }[match[2]]);
   match = path.match(/^\/jobs\/([0-9a-f-]{36})\/check$/i);
   if (req.method === 'POST' && match && uuid.test(match[1])) return checkJobNow(req, res, match[1]);
   match = path.match(/^\/jobs\/([0-9a-f-]{36})\/stop$/i);
