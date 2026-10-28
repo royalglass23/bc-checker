@@ -3,7 +3,7 @@ import { database, seal, unseal } from './db.mjs';
 
 const api = 'https://api.servicem8.com/api_1.0';
 const tokenUrl = 'https://go.servicem8.com/oauth/access_token';
-export const scopes = 'vendor read_jobs read_customers read_staff manage_jobs publish_diary_items';
+export const scopes = 'vendor read_jobs read_customers read_staff read_security_roles manage_jobs publish_diary_items';
 const readScopes = ['vendor', 'read_jobs', 'read_customers'];
 
 export function oauthAuthorizeUrl(cfg, state) {

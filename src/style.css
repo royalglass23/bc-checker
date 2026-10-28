@@ -95,7 +95,10 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .jobs-table td:last-child button { background: var(--brand-soft); color: var(--brand-strong); }
 .jobs-table td:last-child button:hover { background: var(--brand-soft-hover); }
 .audit-panel { margin-top: 32px; }
-.audit-panel > .hint { margin: 0 0 14px; }
+.audit-panel details { margin: 0; }
+.audit-panel summary { padding: 14px 16px; border: 1px solid var(--border); border-radius: 3px; background: var(--surface); color: var(--text); font-size: 1.2rem; font-weight: 700; box-shadow: var(--shadow); }
+.audit-panel details[open] summary { margin-bottom: 14px; }
+.audit-panel .hint { margin: 0 0 14px; }
 .audit-table { width: 100%; min-width: 680px; border-collapse: collapse; text-align: left; }
 .audit-table th, .audit-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .audit-table thead th { font-size: .8rem; color: var(--text-secondary); background: var(--surface-subtle); }

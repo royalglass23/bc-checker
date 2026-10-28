@@ -34,6 +34,7 @@ test('embedded forms reach their validation and still require a valid CSRF token
   console.error = (...args) => errors.push(args);
   const originalQuery = pg.Pool.prototype.query;
   pg.Pool.prototype.query = async function (sql) {
+    if (sql.includes('SELECT scope FROM oauth_connections')) return { rows: [{ scope: '' }] };
     if (sql.includes('count(*)::int')) return { rows: [{ total: 0 }] };
     if (sql.includes('FROM checker_audit_events')) return { rows: [] };
     if (sql.includes('FROM monitored_jobs') || sql.includes('FROM consent_candidates')) return { rows: [] };

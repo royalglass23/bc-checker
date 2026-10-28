@@ -4,6 +4,7 @@ import http from 'node:http';
 import { test } from 'node:test';
 import { SignJWT } from 'jose';
 import pg from 'pg';
+import { seal } from '../src/db.mjs';
 import { requestListener } from '../src/server.mjs';
 
 test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async () => {
@@ -18,20 +19,44 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     CRON_SECRET: 'test-cron-secret-at-least-32-characters',
   });
   const originalQuery = pg.Pool.prototype.query;
+  const originalConnect = pg.Pool.prototype.connect;
+  const originalFetch = globalThis.fetch;
   const searches = [];
+  let roleName = 'Admin';
+  let grantStaffScope = true;
+  let activityQueries = 0;
+  globalThis.fetch = async (url, options) => {
+    if (String(url) === 'https://api.servicem8.com/api_1.0/staff.json') return { ok: true, json: async () => [
+      { uuid: '22222222-2222-4222-8222-222222222222', first: 'Alex', last: 'Admin', active: 1,
+        security_role_uuid: '66666666-6666-4666-8666-666666666666' },
+      { uuid: '77777777-7777-4777-8777-777777777777', first: 'Michael', last: 'Example', active: 1 },
+    ] };
+    if (String(url).includes('/securityrole/')) return { ok: true, json: async () => ({ active: 1, name: roleName }) };
+    return originalFetch(url, options);
+  };
+  pg.Pool.prototype.connect = async function () { return { release() {}, async query(sql) {
+    if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(sql) || sql.includes('pg_advisory_xact_lock')) return {};
+    if (sql.includes('SELECT * FROM oauth_connections')) return { rows: [{
+      expires_at: new Date(Date.now() + 3600_000), access_token_ciphertext: seal('token', Buffer.alloc(32)),
+    }] };
+    throw new Error(`Unexpected client query: ${sql}`);
+  } }; };
   pg.Pool.prototype.query = async function (sql, params) {
     if (sql.includes('INSERT INTO used_events')) return { rowCount: 1, rows: [{ event_hash: 'used' }] };
     if (sql.includes('INSERT INTO checker_audit_events') || sql.includes('UPDATE checker_audit_events')) return { rowCount: 1, rows: [] };
-    if (sql.includes('FROM checker_audit_events')) return { rows: [{ event_type: 'job_stopped',
-      job_number: 'R122', staff_uuid: '22222222-2222-4222-8222-222222222222',
-      staff_name: 'Michael Example', outcome: 'success', detail: '',
-      created_at: '2026-10-28T00:00:00Z' }] };
+    if (sql.includes('FROM checker_audit_events')) { activityQueries++; return { rows: [{ event_type: 'job_stopped',
+      job_number: 'R122', staff_uuid: '77777777-7777-4777-8777-777777777777',
+      staff_name: '', outcome: 'success', detail: '',
+      created_at: '2026-10-28T00:00:00Z' }, { event_type: 'job_added',
+      job_number: 'R121', staff_uuid: '88888888-8888-4888-8888-888888888888',
+      staff_name: '', outcome: 'success', detail: '',
+      created_at: '2026-10-27T00:00:00Z' }] }; }
     if (sql.includes('FROM monitored_jobs')) searches.push(params?.[2]);
     if (sql.includes('count(*)::int')) return { rows: [{ total: 1 }] };
     if (sql.includes('FROM monitored_jobs')) return { rows: [{ id: '33333333-3333-4333-8333-333333333333',
       job_uuid: '44444444-4444-4444-8444-444444444444', job_number: 'R123',
       job_address: '1 Example Street', client_name: 'Example Client', baseline_complete: false, last_checked_at: null }] };
-    if (sql.includes('SELECT scope FROM oauth_connections')) return { rows: [{ scope: 'vendor read_jobs read_customers manage_jobs publish_diary_items' }] };
+    if (sql.includes('SELECT scope FROM oauth_connections')) return { rows: [{ scope: `vendor read_jobs read_customers ${grantStaffScope ? 'read_staff read_security_roles' : ''} manage_jobs publish_diary_items` }] };
     if (sql.includes('FROM consent_candidates')) return { rows: [{ id: '55555555-5555-4555-8555-555555555555',
       monitored_job_id: '33333333-3333-4333-8333-333333333333', decision: 'needs_review',
       consent_number: 'BC123', action: 'Issued', event_date: '2026-10-28',
@@ -75,10 +100,12 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /Consent candidates for Job R123/);
     assert.match(html, /BC123/);
     assert.match(html, /Recent checker activity/);
+    assert.match(html, /<details><summary><span>Recent checker activity<\/span><\/summary>/);
     assert.match(html, /Stopped monitoring/);
     assert.match(html, /Michael Example/);
+    assert.match(html, /Staff member/);
+    assert.doesNotMatch(html, /88888888-8888-4888-8888-888888888888/);
     assert.match(html, /action="https:\/\/bc-checker\.example\.test\/jobs\/33333333-3333-4333-8333-333333333333\/stop"/);
-    assert.doesNotMatch(html, /<details|<summary/);
     assert.ok(html.indexOf('class="pagination"') > html.indexOf('</table>'));
     assert.ok(html.indexOf('Jobs per page') > html.indexOf('</table>'));
     assert.doesNotMatch(html, /Opening…|Open BC Checker|\/launch/);
@@ -106,6 +133,15 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     });
     assert.equal(view.status, 200);
     assert.match(await view.text(), /<h1>BC Checker<\/h1>/);
+    roleName = 'Developer';
+    const developerView = await fetch(`${base}/view`, { method: 'POST', body: new URLSearchParams({ session }) });
+    assert.match(await developerView.text(), /Recent checker activity/);
+    roleName = 'Staff';
+    const queriesBeforeStaffView = activityQueries;
+    const staffView = await fetch(`${base}/view`, { method: 'POST', body: new URLSearchParams({ session }) });
+    const staffHtml = await staffView.text();
+    assert.doesNotMatch(staffHtml, /Recent checker activity|Michael Example|Stopped monitoring/);
+    assert.equal(activityQueries, queriesBeforeStaffView);
     for (const [kind, heading] of [['success', 'Jobs added'], ['partial', 'Some jobs could not be added'], ['error', 'Jobs not added']]) {
       const resultView = await fetch(`${base}/view`, { method: 'POST',
         body: new URLSearchParams({ session, addResult: '1 job added.', addKind: kind }),
@@ -126,6 +162,7 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
       assert.match(resultHtml, /id="checkJobResult"/);
       assert.match(resultHtml, /Address checked\./);
     }
+    grantStaffScope = false;
     const missingStaffScope = await fetch(`${base}/jobs/33333333-3333-4333-8333-333333333333/check`, {
       method: 'POST', body: new URLSearchParams({ session, csrf }),
     });
@@ -139,6 +176,8 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.ok(searches.includes('Exam'));
   } finally {
     pg.Pool.prototype.query = originalQuery;
+    pg.Pool.prototype.connect = originalConnect;
+    globalThis.fetch = originalFetch;
     await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });
