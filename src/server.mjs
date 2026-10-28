@@ -208,7 +208,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     const renderCandidate = row => `<li class="candidate ${escape(row.decision)}">
       <button type="button" class="candidate-trigger" data-candidate-dialog="candidate-${escape(row.id)}" aria-haspopup="dialog" aria-controls="candidate-${escape(row.id)}">
         <strong>${escape(row.consent_number || 'Number unavailable')}</strong><span class="candidate-summary">${escape(row.action || 'Status unclear')} · ${escape(row.event_date || 'Date unavailable')}</span>
-        <span class="pill">${escape(row.decision.replace('_', ' '))}</span><span class="candidate-hint">View details</span>
+        <span class="pill">${escape(row.decision.replace('_', ' '))}</span>
       </button>
       <dialog id="candidate-${escape(row.id)}" class="candidate-dialog" aria-labelledby="candidate-title-${escape(row.id)}">
       <div class="candidate-dialog-heading"><h4 id="candidate-title-${escape(row.id)}">Consent ${escape(row.consent_number || 'number unavailable')}</h4><button type="button" class="candidate-close" aria-label="Close consent details">×</button></div>

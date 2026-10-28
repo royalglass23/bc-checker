@@ -60,9 +60,20 @@ window.addEventListener('pageshow', event => {
 for (const trigger of document.querySelectorAll('.candidate-trigger')) {
   const dialog = document.getElementById(trigger.dataset.candidateDialog);
   if (!dialog) continue;
-  const open = () => { if (!dialog.open) dialog.showModal(); };
-  trigger.addEventListener('mouseenter', open);
-  trigger.addEventListener('click', open);
+  trigger.addEventListener('mouseenter', () => {
+    if (dialog.open) return;
+    dialog.classList.add('candidate-preview');
+    dialog.show();
+  });
+  trigger.addEventListener('mouseleave', () => {
+    if (dialog.classList.contains('candidate-preview')) dialog.close();
+  });
+  trigger.addEventListener('click', () => {
+    if (dialog.classList.contains('candidate-preview')) dialog.close();
+    dialog.classList.remove('candidate-preview');
+    if (!dialog.open) dialog.showModal();
+  });
+  dialog.addEventListener('close', () => dialog.classList.remove('candidate-preview'));
   dialog.querySelector('.candidate-close')?.addEventListener('click', () => dialog.close());
   dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
   dialog.querySelector('form[action$="/delete"]')?.addEventListener('submit', event => {
