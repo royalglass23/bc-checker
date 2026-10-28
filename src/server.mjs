@@ -204,7 +204,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
   });
   const flash = message ?? query.get('message');
   const result = addResult ?? (query.has('addResult') ? {
-    message: String(query.get('addResult')).slice(0, 300),
+    message: String(query.get('addResult')).slice(0, 4000),
     kind: ['success', 'partial'].includes(query.get('addKind')) ? query.get('addKind') : 'error',
   } : null);
   const checked = checkResult ?? (query.has('checkResult') ? {
@@ -258,12 +258,24 @@ async function addJobs(req, res) {
     const actorName = await auditStaffName(identity, token);
     let added = 0;
     const alreadyMonitored = [];
+    const missingDetails = [];
     const failures = [];
     for (const number of numbers) {
       try {
         const job = await getJobByNumber(token, number);
-        if (!uuid.test(job.uuid) || !job.job_address?.trim()) throw new Error('Job has no usable address');
+        if (!uuid.test(job.uuid)) throw new Error('Job has no usable ID');
         const clientName = await getClientName(token, job.company_uuid);
+        const missing = [
+          !clientName && 'client name',
+          !String(job.job_address ?? '').trim() && 'address',
+        ].filter(Boolean);
+        if (missing.length) {
+          missingDetails.push(`${number} (${missing.join(' and ')})`);
+          await recordAudit(db, { accountUUID: identity.accountUUID, jobUUID: job.uuid,
+            jobNumber: number, type: 'job_add_attempt', staffUUID: identity.staffUUID,
+            staffName: actorName, outcome: 'skipped', detail: `Missing ${missing.join(' and ')}` });
+          continue;
+        }
         const client = await db.connect();
         let addedNow = false;
         try {
@@ -304,8 +316,8 @@ async function addJobs(req, res) {
           error: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
-    kind = added ? (alreadyMonitored.length || failures.length ? 'partial' : 'success') : 'error';
-    message = `${added} of ${numbers.length} job${numbers.length === 1 ? '' : 's'} added.${alreadyMonitored.length ? ` Already monitored: ${alreadyMonitored.join(', ').slice(0, 120)}.` : ''}${failures.length ? ` Could not add: ${failures.join(', ').slice(0, 120)}.` : ''}`;
+    kind = added ? (alreadyMonitored.length || missingDetails.length || failures.length ? 'partial' : 'success') : 'error';
+    message = `${added} of ${numbers.length} job${numbers.length === 1 ? '' : 's'} added.${missingDetails.length ? ` Not added, missing details: ${missingDetails.join(', ')}.` : ''}${alreadyMonitored.length ? ` Already monitored: ${alreadyMonitored.join(', ').slice(0, 120)}.` : ''}${failures.length ? ` Could not add: ${failures.join(', ').slice(0, 120)}.` : ''}`;
   } catch (error) {
     kind = 'error';
     message = error.message === 'Enter 1–50 valid job numbers separated by commas'
