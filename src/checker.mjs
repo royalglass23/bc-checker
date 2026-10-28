@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { finishAudit, recordAudit } from './audit.mjs';
-import { bcStatus } from './bc-note.mjs';
+import { bcAssessment } from './bc-note.mjs';
 import { database } from './db.mjs';
 import { classifyEvent, consentIdentity, isIssued, latestConsentEvents, normaliseAddress } from './domain.mjs';
 import { lookupConsents } from './homes.mjs';
@@ -52,8 +52,9 @@ export async function checkOne(cfg, row, deps = {}) {
     await client.query(`UPDATE monitored_jobs SET baseline_complete=true, last_checked_at=now(),
       next_check_at=now() + interval '13 days', last_error=NULL WHERE id=$1`, [row.id]);
     await client.query('COMMIT');
+    const assessment = bcAssessment(result.events);
     return { firstCheck, newCandidates, events: result.events.length,
-      noteStatus: bcStatus(result.events),
+      noteStatus: assessment.status, olderBuildingConsent: assessment.older,
       matchedAddress: result.matchedAddress, sourceUrl: result.sourceUrl };
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }

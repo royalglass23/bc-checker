@@ -49,13 +49,26 @@ test('staff name is resolved from the signed staff UUID', async () => {
   } finally { globalThis.fetch = original; }
 });
 
-test('manual check Diary entry names the staff member who triggered it', () => {
+test('manual check Diary explains historical BC exclusion without repeating the staff name', () => {
   const content = manualCheckDiaryContent({ job_number: 'R123', job_address: '1 Example Street' },
-    { events: 2, firstCheck: false, newCandidates: 1, sourceUrl: 'https://example.test/source' },
-    'Roxy Example', '28/10/2026, 12:31 pm');
-  assert.match(content, /Checked by: Roxy Example/);
+    { events: 1, firstCheck: true, newCandidates: 0, noteStatus: 'NO BC - 28 Oct 2026',
+      olderBuildingConsent: { number: 'BC2023', date: '2023-05-01' },
+      sourceUrl: 'https://example.test/source' }, '28/10/2026, 12:31 pm');
+  assert.doesNotMatch(content, /Checked by:/);
   assert.match(content, /Job R123: 1 Example Street/);
+  assert.match(content, /first check baseline recorded/);
+  assert.match(content, /Job Note result: NO BC - 28 Oct 2026/);
+  assert.match(content, /Historical BC BC2023 \(2023-05-01\) is more than 3 years old/);
+  assert.match(content, /staff should confirm whether any consent relates to this Job/);
+  assert.match(content, /Source: https:\/\/example\.test\/source/);
+});
+
+test('manual check Diary does not imply a historical BC when none was classified', () => {
+  const content = manualCheckDiaryContent({ job_number: 'R123', job_address: '1 Example Street' },
+    { events: 1, firstCheck: false, newCandidates: 1, noteStatus: 'BC - BC123 - 28 Oct 2026',
+      sourceUrl: 'https://example.test/source' }, '28/10/2026, 12:31 pm');
   assert.match(content, /1 new candidate\(s\) to review/);
+  assert.doesNotMatch(content, /Historical BC|more than 3 years old/);
 });
 
 test('manual check updates the Job Note field and creates one Diary item', async () => {
