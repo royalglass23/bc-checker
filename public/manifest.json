@@ -5,7 +5,7 @@
   "iconURL": "https://bc-checker-rho.vercel.app/icon.png",
   "supportEmail": "support@royalglass.co.nz",
   "oauth": {
-    "scope": "vendor read_jobs read_customers read_staff manage_jobs publish_diary_items"
+    "scope": "vendor read_jobs read_customers read_staff read_security_roles manage_jobs publish_diary_items"
   },
   "actions": [],
   "menuItems": [

@@ -9,7 +9,7 @@ import { database } from './db.mjs';
 import { checkOne, runDueChecks } from './checker.mjs';
 import { jobPage, parseJobNumbers } from './domain.mjs';
 import { accessToken, addDiaryItem, consumeOAuthState, createOAuthState, exchangeCode,
-  getClientName, getJobByNumber, getStaffName, oauthAuthorizeUrl, saveConnection, updateJobNoteField, vendorUUID } from './servicem8.mjs';
+  getClientName, getJobByNumber, getStaffName, oauthAuthorizeUrl, saveConnection, serviceM8Get, updateJobNoteField, vendorUUID } from './servicem8.mjs';
 
 let cfg;
 let db;
@@ -85,6 +85,28 @@ async function auditStaffName(identity, token = null) {
       staffUUID: identity.staffUUID, error: error instanceof Error ? error.message : 'Unknown error',
     });
     return '';
+  }
+}
+
+async function activityStaffNames(identity) {
+  try {
+    const connection = await db.query('SELECT scope FROM oauth_connections WHERE account_uuid=$1', [identity.accountUUID]);
+    const granted = new Set(String(connection.rows[0]?.scope ?? '').split(/\s+/));
+    if (!granted.has('read_staff') || !granted.has('read_security_roles')) return null;
+    const token = await accessToken(cfg, identity.accountUUID);
+    const staff = await serviceM8Get(token, '/staff.json');
+    if (!Array.isArray(staff)) return null;
+    const viewer = staff.find(member => String(member.uuid).toLowerCase() === identity.staffUUID);
+    if (!viewer || Number(viewer.active) !== 1 || !uuid.test(String(viewer.security_role_uuid))) return null;
+    const role = await serviceM8Get(token, `/securityrole/${encodeURIComponent(viewer.security_role_uuid)}.json`);
+    if (Number(role.active) !== 1 || !['admin', 'administrator', 'developer'].includes(String(role.name ?? '').trim().toLowerCase())) return null;
+    return new Map(staff.map(member => [String(member.uuid).toLowerCase(),
+      `${String(member.first ?? '').trim()} ${String(member.last ?? '').trim()}`.trim().replace(/\s+/g, ' ').slice(0, 80)]));
+  } catch (error) {
+    console.warn('BC Checker could not verify activity access', {
+      staffUUID: identity.staffUUID, error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return null;
   }
 }
 
@@ -167,9 +189,10 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     WHERE j.account_uuid=$1 AND j.status='active' AND j.id=ANY($2::uuid[])
     ORDER BY c.first_seen_at DESC`, [identity.accountUUID, jobs.rows.map(job => job.id)]);
   const byJob = Map.groupBy(candidates.rows, row => row.monitored_job_id);
-  const audit = await db.query(`SELECT event_type, job_number, staff_uuid, staff_name, outcome, detail, created_at
+  const staffNames = await activityStaffNames(identity);
+  const audit = staffNames ? await db.query(`SELECT event_type, job_number, staff_uuid, staff_name, outcome, detail, created_at
     FROM checker_audit_events WHERE account_uuid=$1 ORDER BY created_at DESC, id DESC LIMIT 50`,
-  [identity.accountUUID]);
+  [identity.accountUUID]) : null;
   const auditLabels = {
     job_added: 'Job added', job_add_attempt: 'Add job', job_stopped: 'Stopped monitoring',
     manual_check: 'Check now', scheduled_check: 'Scheduled check', bc_ignored: 'Wrong BC',
@@ -231,8 +254,8 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Client</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check</th><th scope="col">Stop</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : `<p class="empty">${term ? `No monitored jobs match “${escape(term)}”.` : 'No jobs are being monitored. Add a job number to start.'}</p>`}
     ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div>
     <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<input type="hidden" name="search" value="${escape(term)}"><label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>
-    <section class="audit-panel" aria-label="Recent checker activity"><h2>Recent checker activity</h2><p class="hint">The latest 50 actions for this ServiceM8 account.</p>
-    ${audit.rows.length ? `<div class="table-scroll"><table class="audit-table"><thead><tr><th scope="col">When</th><th scope="col">Job</th><th scope="col">Event</th><th scope="col">By</th><th scope="col">Result</th></tr></thead><tbody>${audit.rows.map(row => `<tr><td>${escape(new Date(row.created_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' }))}</td><td>${escape(row.job_number || '—')}</td><td>${escape(auditLabels[row.event_type] ?? row.event_type)}${row.detail ? `<span class="audit-detail">${escape(row.detail)}</span>` : ''}</td><td>${escape(row.staff_name || (row.staff_uuid ? `Staff ${row.staff_uuid}` : 'BC Checker scheduler'))}</td><td>${escape(row.outcome)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No checker activity has been recorded yet.</p>'}</section>`, true, embedded);
+    ${audit ? `<section class="audit-panel" aria-label="Recent checker activity"><details><summary><span>Recent checker activity</span></summary><p class="hint">The latest 50 actions for this ServiceM8 account.</p>
+    ${audit.rows.length ? `<div class="table-scroll"><table class="audit-table"><thead><tr><th scope="col">When</th><th scope="col">Job</th><th scope="col">Event</th><th scope="col">By</th><th scope="col">Result</th></tr></thead><tbody>${audit.rows.map(row => `<tr><td>${escape(new Date(row.created_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' }))}</td><td>${escape(row.job_number || '—')}</td><td>${escape(auditLabels[row.event_type] ?? row.event_type)}${row.detail ? `<span class="audit-detail">${escape(row.detail)}</span>` : ''}</td><td>${escape(row.staff_name || (row.staff_uuid ? staffNames.get(String(row.staff_uuid).toLowerCase()) || 'Staff member' : 'BC Checker scheduler'))}</td><td>${escape(row.outcome)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No checker activity has been recorded yet.</p>'}</details></section>` : ''}`, true, embedded);
 }
 
 async function dashboard(req, res, params, message, addResult = null, checkResult = null) {
@@ -243,6 +266,22 @@ async function dashboard(req, res, params, message, addResult = null, checkResul
   respond(res, 200, html, 'text/html; charset=utf-8', {
     'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors https://*.servicem8.com",
   });
+}
+
+function addFailureReason(error, step) {
+  const message = error instanceof Error ? error.message : '';
+  if (/^Job .+ was not uniquely found$/.test(message)) return 'job number not uniquely found in ServiceM8';
+  if (message === 'ServiceM8 returned 404') return step === 'lookup_client'
+    ? 'linked client not found in ServiceM8' : 'job number not found in ServiceM8';
+  if (message === 'ServiceM8 returned 401' || message === 'ServiceM8 returned 403') {
+    return 'ServiceM8 access denied; reauthorise the add-on';
+  }
+  if (message === 'ServiceM8 returned 429') return 'ServiceM8 rate limit reached; try again later';
+  if (/^ServiceM8 returned 5\d\d$/.test(message)) return 'ServiceM8 is unavailable; try again later';
+  if (/^ServiceM8 returned 4\d\d$/.test(message)) return 'ServiceM8 rejected the request; contact support';
+  if (message === 'Job has no usable ID') return 'ServiceM8 returned an incomplete job';
+  if (error instanceof Error && error.name === 'TimeoutError') return 'ServiceM8 request timed out; try again later';
+  return 'BC Checker could not add this job; contact support';
 }
 
 async function addJobs(req, res) {
@@ -259,11 +298,13 @@ async function addJobs(req, res) {
     let added = 0;
     const alreadyMonitored = [];
     const missingDetails = [];
-    const failures = [];
+    const failures = new Map();
     for (const number of numbers) {
+      let step = 'lookup_job';
       try {
         const job = await getJobByNumber(token, number);
         if (!uuid.test(job.uuid)) throw new Error('Job has no usable ID');
+        step = 'lookup_client';
         const clientName = await getClientName(token, job.company_uuid);
         const missing = [
           !clientName && 'client name',
@@ -276,6 +317,7 @@ async function addJobs(req, res) {
             staffName: actorName, outcome: 'skipped', detail: `Missing ${missing.join(' and ')}` });
           continue;
         }
+        step = 'save';
         const client = await db.connect();
         let addedNow = false;
         try {
@@ -308,16 +350,17 @@ async function addJobs(req, res) {
         if (addedNow) added++;
         else alreadyMonitored.push(number);
       } catch (error) {
+        const reason = addFailureReason(error, step);
         await recordAudit(db, { accountUUID: identity.accountUUID, jobNumber: number,
           type: 'job_add_attempt', staffUUID: identity.staffUUID, staffName: actorName,
-          outcome: 'failed', detail: 'Job could not be added' });
-        failures.push(number);
+          outcome: 'failed', detail: reason });
+        failures.set(reason, [...(failures.get(reason) ?? []), number]);
         console.error('BC Checker job could not be added', { number,
           error: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
-    kind = added ? (alreadyMonitored.length || missingDetails.length || failures.length ? 'partial' : 'success') : 'error';
-    message = `${added} of ${numbers.length} job${numbers.length === 1 ? '' : 's'} added.${missingDetails.length ? ` Not added, missing details: ${missingDetails.join(', ')}.` : ''}${alreadyMonitored.length ? ` Already monitored: ${alreadyMonitored.join(', ').slice(0, 120)}.` : ''}${failures.length ? ` Could not add: ${failures.join(', ').slice(0, 120)}.` : ''}`;
+    kind = added ? (alreadyMonitored.length || missingDetails.length || failures.size ? 'partial' : 'success') : 'error';
+    message = `${added} of ${numbers.length} job${numbers.length === 1 ? '' : 's'} added.${missingDetails.length ? ` Not added, missing details: ${missingDetails.join(', ')}.` : ''}${alreadyMonitored.length ? ` Already monitored: ${alreadyMonitored.join(', ').slice(0, 120)}.` : ''}${failures.size ? ` Could not add: ${[...failures].map(([reason, jobNumbers]) => `${jobNumbers.join(', ')} (${reason})`).join('; ')}.` : ''}`;
   } catch (error) {
     kind = 'error';
     message = error.message === 'Enter 1–50 valid job numbers separated by commas'
