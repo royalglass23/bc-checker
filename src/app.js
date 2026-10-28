@@ -5,8 +5,11 @@ const loadingDialog = document.querySelector('#addJobsLoading');
 const resultDialog = document.querySelector('#addJobsResult');
 const checkLoadingDialog = document.querySelector('#checkJobLoading');
 const checkResultDialog = document.querySelector('#checkJobResult');
+const stopLoadingDialog = document.querySelector('#stopJobLoading');
+const stopResultDialog = document.querySelector('#stopJobResult');
 let addingJobs = false;
 let checkingJob = false;
+let stoppingJob = false;
 
 addForm?.addEventListener('submit', event => {
   if (!addForm.reportValidity()) { event.preventDefault(); return; }
@@ -42,19 +45,38 @@ if (checkResultDialog) {
   document.body.classList.add('modal-active');
   document.querySelector('#closeCheckJobResult')?.focus();
 }
+for (const form of document.querySelectorAll('.stop-job-form')) {
+  form.addEventListener('submit', event => {
+    if (stoppingJob) { event.preventDefault(); return; }
+    stoppingJob = true;
+    form.querySelector('button[type="submit"]').disabled = true;
+    document.querySelector('#stopJobLoadingTitle').textContent = `Stopping monitoring for Job ${form.dataset.jobNumber}`;
+    stopLoadingDialog?.showModal();
+    document.body.classList.add('modal-active');
+  });
+}
+stopLoadingDialog?.addEventListener('cancel', event => event.preventDefault());
+stopResultDialog?.addEventListener('close', () => document.body.classList.remove('modal-active'));
+if (stopResultDialog) {
+  stopResultDialog.showModal();
+  document.body.classList.add('modal-active');
+  document.querySelector('#closeStopJobResult')?.focus();
+}
 window.addEventListener('pageshow', event => {
   if (!event.persisted) return;
   loadingDialog?.close();
   checkLoadingDialog?.close();
+  stopLoadingDialog?.close();
   addingJobs = false;
   checkingJob = false;
-  for (const button of document.querySelectorAll('.check-job-form button[type="submit"]')) button.disabled = false;
+  stoppingJob = false;
+  for (const button of document.querySelectorAll('.check-job-form button[type="submit"], .stop-job-form button[type="submit"]')) button.disabled = false;
   if (submit) {
     submit.disabled = false;
     submit.textContent = 'Add Jobs';
   }
   if (addStatus) addStatus.textContent = '';
-  if (!resultDialog?.open && !checkResultDialog?.open) document.body.classList.remove('modal-active');
+  if (!resultDialog?.open && !checkResultDialog?.open && !stopResultDialog?.open) document.body.classList.remove('modal-active');
 });
 
 for (const trigger of document.querySelectorAll('.candidate-trigger')) {

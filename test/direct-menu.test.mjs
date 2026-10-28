@@ -91,7 +91,9 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /class="check-job-form" data-job-number="R123"/);
     assert.match(html, /class="icon-button check" type="submit" aria-label="Check now Job R123"/);
     assert.match(html, /id="checkJobLoading" class="job-dialog"/);
+    assert.match(html, /id="stopJobLoading" class="job-dialog"/);
     assert.match(html, /class="icon-button stop" type="submit" aria-label="Stop monitoring Job R123"/);
+    assert.match(html, /class="stop-job-form" data-job-number="R123"/);
     assert.match(html, /<label for="jobNumbers">Job numbers<\/label>/);
     assert.match(html, /name="jobNumbers" rows="4"/);
     assert.match(html, /Separate ServiceM8 job numbers with commas/);
@@ -181,6 +183,16 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
       assert.match(resultHtml, new RegExp(heading));
       assert.match(resultHtml, /id="checkJobResult"/);
       assert.match(resultHtml, /Address checked\./);
+    }
+    for (const [kind, heading] of [['success', 'Monitoring stopped'], ['error', 'Monitoring not stopped']]) {
+      const resultView = await fetch(`${base}/view`, { method: 'POST',
+        body: new URLSearchParams({ session, stopResult: 'Job removed from monitoring.', stopKind: kind }),
+      });
+      assert.equal(resultView.status, 200);
+      const resultHtml = await resultView.text();
+      assert.match(resultHtml, new RegExp(heading));
+      assert.match(resultHtml, /id="stopJobResult"/);
+      assert.match(resultHtml, /Job removed from monitoring\./);
     }
     grantStaffScope = false;
     const missingStaffScope = await fetch(`${base}/jobs/33333333-3333-4333-8333-333333333333/check`, {

@@ -170,10 +170,10 @@ function iconActionForm(path, action, jobNumber, csrf, session = '', origin = ''
   const icon = action === 'check'
     ? '<path d="M7 4.5v15l12-7.5z"/>'
     : '<rect x="6" y="6" width="12" height="12" rx="1"/>';
-  return `<form method="post" action="${escape(origin + path)}"${action === 'check' ? ` class="check-job-form" data-job-number="${escape(jobNumber)}"` : ''}><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}<button class="icon-button ${action}" type="submit" aria-label="${escape(label)}" title="${escape(label)}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icon}</svg></button></form>`;
+  return `<form method="post" action="${escape(origin + path)}" class="${action}-job-form" data-job-number="${escape(jobNumber)}"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}<button class="icon-button ${action}" type="submit" aria-label="${escape(label)}" title="${escape(label)}"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">${icon}</svg></button></form>`;
 }
 
-async function renderDashboard(identity, session, query, message, embedded = false, addResult = null, checkResult = null) {
+async function renderDashboard(identity, session, query, message, embedded = false, addResult = null, checkResult = null, stopResult = null) {
   const origin = embedded ? cfg.baseUrl : '';
   const search = String(query.get('search') ?? '').trim().slice(0, 100);
   const term = search.length >= 3 ? search : '';
@@ -243,6 +243,10 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     message: String(query.get('checkResult')).slice(0, 300),
     kind: query.get('checkKind') === 'success' ? 'success' : 'error',
   } : null);
+  const stopped = stopResult ?? (query.has('stopResult') ? {
+    message: String(query.get('stopResult')).slice(0, 300),
+    kind: query.get('stopKind') === 'success' ? 'success' : 'error',
+  } : null);
   const pageControl = (number, label, rel) => session
     ? `<form method="post" action="${escape(origin)}/view"><input type="hidden" name="session" value="${escape(session)}"><input type="hidden" name="search" value="${escape(term)}"><input type="hidden" name="page" value="${number}"><input type="hidden" name="size" value="${pageSize}"><button type="submit">${label}</button></form>`
     : `<a href="/?page=${number}&amp;size=${pageSize}&amp;search=${encodeURIComponent(term)}" rel="${rel}">${label}</a>`;
@@ -255,9 +259,11 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     <button id="addJobsButton" type="submit">Add Jobs</button><span id="addJobsStatus" class="submit-status" role="status" aria-live="polite"></span></form></section></div>
     <dialog id="addJobsLoading" class="job-dialog" aria-labelledby="addJobsLoadingTitle" aria-describedby="addJobsLoadingText"><div class="dialog-content"><span class="spinner" aria-hidden="true"></span><div><h2 id="addJobsLoadingTitle">Adding jobs</h2><p id="addJobsLoadingText">Please wait while the jobs are added to monitoring.</p></div></div></dialog>
     <dialog id="checkJobLoading" class="job-dialog" aria-labelledby="checkJobLoadingTitle" aria-describedby="checkJobLoadingText"><div class="dialog-content"><span class="spinner" aria-hidden="true"></span><div><h2 id="checkJobLoadingTitle">Checking job</h2><p id="checkJobLoadingText">Please wait while the address is checked.</p></div></div></dialog>
+    <dialog id="stopJobLoading" class="job-dialog" aria-labelledby="stopJobLoadingTitle" aria-describedby="stopJobLoadingText"><div class="dialog-content"><span class="spinner" aria-hidden="true"></span><div><h2 id="stopJobLoadingTitle">Stopping monitoring</h2><p id="stopJobLoadingText">Please wait while the job is removed from monitoring.</p></div></div></dialog>
     ${result ? `<dialog id="addJobsResult" class="job-dialog ${result.kind}" aria-labelledby="addJobsResultTitle" aria-describedby="addJobsResultText"><h2 id="addJobsResultTitle">${result.kind === 'success' ? 'Jobs added' : result.kind === 'partial' ? 'Some jobs could not be added' : 'Jobs not added'}</h2><p id="addJobsResultText">${escape(result.message)}</p><form method="dialog"><button id="closeAddJobsResult" type="submit">OK</button></form></dialog>` : ''}
     ${checked ? `<dialog id="checkJobResult" class="job-dialog ${checked.kind}" aria-labelledby="checkJobResultTitle" aria-describedby="checkJobResultText"><h2 id="checkJobResultTitle">${checked.kind === 'success' ? 'Job checked' : 'Job check not completed'}</h2><p id="checkJobResultText">${escape(checked.message)}</p><form method="dialog"><button id="closeCheckJobResult" type="submit">OK</button></form></dialog>` : ''}
-    ${flash && !result && !checked ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
+    ${stopped ? `<dialog id="stopJobResult" class="job-dialog ${stopped.kind}" aria-labelledby="stopJobResultTitle" aria-describedby="stopJobResultText"><h2 id="stopJobResultTitle">${stopped.kind === 'success' ? 'Monitoring stopped' : 'Monitoring not stopped'}</h2><p id="stopJobResultText">${escape(stopped.message)}</p><form method="dialog"><button id="closeStopJobResult" type="submit">OK</button></form></dialog>` : ''}
+    ${flash && !result && !checked && !stopped ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
     <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${term ? `${total} matching` : `${total} active`} ${total === 1 ? 'job' : 'jobs'}</p></div>
     <form id="jobSearchForm" class="job-search" method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}">${hiddenSession(session)}<input type="hidden" name="size" value="${pageSize}"><label for="jobSearch">Search jobs</label><input id="jobSearch" name="search" type="search" minlength="3" maxlength="100" value="${escape(search)}" placeholder="Job number, address or client" autocomplete="off"${term ? ' autofocus' : ''}><button type="submit">Search</button>${term ? '<button id="clearSearch" type="button">Clear</button>' : ''}</form></div>
     ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Client</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check</th><th scope="col">Stop</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : `<p class="empty">${term ? `No monitored jobs match “${escape(term)}”.` : 'No jobs are being monitored. Add a job number to start.'}</p>`}
@@ -267,11 +273,11 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     ${audit.rows.length ? `<div class="table-scroll"><table class="audit-table"><thead><tr><th scope="col">When</th><th scope="col">Job</th><th scope="col">Event</th><th scope="col">By</th><th scope="col">Result</th></tr></thead><tbody>${audit.rows.map(row => `<tr><td>${escape(new Date(row.created_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' }))}</td><td>${escape(row.job_number || '—')}</td><td>${escape(auditLabels[row.event_type] ?? row.event_type)}${row.detail ? `<span class="audit-detail">${escape(row.detail)}</span>` : ''}</td><td>${escape(row.staff_name || (row.staff_uuid ? staffNames.get(String(row.staff_uuid).toLowerCase()) || 'Staff member' : 'BC Checker scheduler'))}</td><td>${escape(row.outcome)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No checker activity has been recorded yet.</p>'}</details></section>` : ''}`, true, embedded);
 }
 
-async function dashboard(req, res, params, message, addResult = null, checkResult = null) {
+async function dashboard(req, res, params, message, addResult = null, checkResult = null, stopResult = null) {
   const identity = await staff(req, res, params);
   if (!identity) return;
   const query = params ?? new URL(req.url, cfg.baseUrl).searchParams;
-  const html = await renderDashboard(identity, params?.get('session') ?? '', query, message, false, addResult, checkResult);
+  const html = await renderDashboard(identity, params?.get('session') ?? '', query, message, false, addResult, checkResult, stopResult);
   respond(res, 200, html, 'text/html; charset=utf-8', {
     'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors https://*.servicem8.com",
   });
@@ -422,6 +428,7 @@ async function stopJob(req, res, jobId) {
   const actorName = await auditStaffName(identity);
   const client = await db.connect();
   let message;
+  let kind = 'success';
   try {
     await client.query('BEGIN');
     const stopped = await client.query(`UPDATE monitored_jobs SET status='stopped', stopped_by_staff_uuid=$3,
@@ -432,12 +439,21 @@ async function stopJob(req, res, jobId) {
         jobNumber: stopped.rows[0].job_number, type: 'job_stopped', staffUUID: identity.staffUUID,
         staffName: actorName, outcome: 'success' });
       message = 'Job removed from monitoring.';
-    } else message = 'Job is no longer being monitored.';
+    } else {
+      kind = 'error';
+      message = 'Job is no longer being monitored.';
+    }
     await client.query('COMMIT');
-  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  } catch (error) {
+    await client.query('ROLLBACK');
+    kind = 'error';
+    message = 'Could not stop monitoring this job. Please try again.';
+    console.error('BC Checker stop monitoring failed', { jobId,
+      error: error instanceof Error ? error.message : 'Unknown error' });
+  }
   finally { client.release(); }
-  if (params.has('session')) return dashboard(req, res, params, message);
-  redirect(res, `/?message=${encodeURIComponent(message)}`);
+  if (params.has('session')) return dashboard(req, res, params, null, null, null, { message, kind });
+  redirect(res, `/?stopResult=${encodeURIComponent(message)}&stopKind=${kind}`);
 }
 
 export function manualCheckDiaryContent(job, outcome, actorName, date) {
