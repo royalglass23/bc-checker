@@ -1,15 +1,60 @@
-const file = document.querySelector('#jobFile');
-const textarea = document.querySelector('#jobNumbers');
-const status = document.querySelector('#fileStatus');
 const submit = document.querySelector('#addJobsButton');
 const addForm = submit?.closest('form');
 const addStatus = document.querySelector('#addJobsStatus');
+const loadingDialog = document.querySelector('#addJobsLoading');
+const resultDialog = document.querySelector('#addJobsResult');
+const checkLoadingDialog = document.querySelector('#checkJobLoading');
+const checkResultDialog = document.querySelector('#checkJobResult');
+let addingJobs = false;
+let checkingJob = false;
 
 addForm?.addEventListener('submit', event => {
   if (!addForm.reportValidity()) { event.preventDefault(); return; }
+  if (addingJobs) { event.preventDefault(); return; }
+  addingJobs = true;
   submit.disabled = true;
   submit.textContent = 'Adding…';
-  if (addStatus) addStatus.textContent = 'Adding job numbers. This may take a moment.';
+  if (addStatus) addStatus.textContent = 'Adding job. This may take a moment.';
+  loadingDialog?.showModal();
+  document.body.classList.add('modal-active');
+});
+loadingDialog?.addEventListener('cancel', event => event.preventDefault());
+resultDialog?.addEventListener('close', () => document.body.classList.remove('modal-active'));
+if (resultDialog) {
+  resultDialog.showModal();
+  document.body.classList.add('modal-active');
+  document.querySelector('#closeAddJobsResult')?.focus();
+}
+for (const form of document.querySelectorAll('.check-job-form')) {
+  form.addEventListener('submit', event => {
+    if (checkingJob) { event.preventDefault(); return; }
+    checkingJob = true;
+    form.querySelector('button[type="submit"]').disabled = true;
+    document.querySelector('#checkJobLoadingTitle').textContent = `Checking Job ${form.dataset.jobNumber}`;
+    checkLoadingDialog?.showModal();
+    document.body.classList.add('modal-active');
+  });
+}
+checkLoadingDialog?.addEventListener('cancel', event => event.preventDefault());
+checkResultDialog?.addEventListener('close', () => document.body.classList.remove('modal-active'));
+if (checkResultDialog) {
+  checkResultDialog.showModal();
+  document.body.classList.add('modal-active');
+  document.querySelector('#closeCheckJobResult')?.focus();
+}
+window.addEventListener('pageshow', event => {
+  if (!event.persisted) return;
+  loadingDialog?.close();
+  checkLoadingDialog?.close();
+  addingJobs = false;
+  checkingJob = false;
+  for (const button of document.querySelectorAll('.check-job-form button[type="submit"]')) button.disabled = false;
+  if (submit) {
+    submit.disabled = false;
+    submit.textContent = 'Add Job';
+  }
+  if (addStatus) addStatus.textContent = '';
+  if (!resultDialog?.open && !checkResultDialog?.open) document.body.classList.remove('modal-active');
 });
 
 const searchForm = document.querySelector('#jobSearchForm');
@@ -23,43 +68,4 @@ searchInput?.addEventListener('input', () => {
 document.querySelector('#clearSearch')?.addEventListener('click', () => {
   searchInput.value = '';
   searchForm.requestSubmit();
-});
-
-if (file && textarea && status && submit) file.addEventListener('change', async () => {
-  const selected = file.files?.[0];
-  if (!selected) return;
-  textarea.value = '';
-  submit.disabled = true;
-  status.textContent = 'Reading file…';
-  try {
-    if (selected.size > 1024 * 1024) throw new Error('File must be 1 MB or smaller.');
-    const extension = selected.name.split('.').pop()?.toLowerCase();
-    if (extension === 'csv') {
-      textarea.value = await selected.text();
-    } else if (extension === 'xlsx') {
-      if (typeof readXlsxFile !== 'function') throw new Error('Spreadsheet reader is unavailable. Please reload the page.');
-      const sheets = await readXlsxFile(selected);
-      const rows = sheets[0]?.data ?? [];
-      if (!rows.length) throw new Error('The first worksheet is empty.');
-      const first = rows[0].map(cell => String(cell ?? '').trim());
-      const headerIndex = first.findIndex(cell => /^(?:job\s*(?:number|no|id)|generated_job_id)$/i.test(cell));
-      const column = headerIndex >= 0 ? headerIndex : 0;
-      const values = (headerIndex >= 0 ? rows.slice(1) : rows)
-        .map(row => String(row[column] ?? '').trim()).filter(Boolean);
-      if (values.some(value => !/^[A-Za-z0-9-]{1,30}$/.test(value))) {
-        throw new Error('The job number column contains an invalid value.');
-      }
-      textarea.value = [...new Set(values)].join('\n');
-    } else {
-      throw new Error('Choose a CSV or XLSX file.');
-    }
-    if (!textarea.value.trim()) throw new Error('No job numbers found in the file.');
-    if (textarea.value.length > 20_000) throw new Error('File contains too much data. Upload up to 50 jobs at a time.');
-    status.textContent = `${selected.name} loaded. Review the job numbers, then add them to monitoring.`;
-  } catch (error) {
-    textarea.value = '';
-    status.textContent = error.message || 'Could not read the file.';
-  } finally {
-    submit.disabled = false;
-  }
 });

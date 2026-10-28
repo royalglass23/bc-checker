@@ -1,11 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyEvent, consentEvents, consentIdentity, isIssued, jobPage, latestConsentEvents, parseJobNumbers, selectExactProperty } from '../src/domain.mjs';
-
-test('CSV and pasted job numbers are deduplicated', () => {
-  assert.deepEqual(parseJobNumbers('Job Number,Address\nR123,12 Main St\nR123\nR124'), ['R123', 'R124']);
-  assert.deepEqual(parseJobNumbers('Client,Generated_Job_ID,Address\n"Example, Ltd",R125,"12 Main Street"'), ['R125']);
-});
+import { classifyEvent, consentEvents, consentIdentity, isIssued, jobPage, latestConsentEvents, selectExactProperty } from '../src/domain.mjs';
 
 test('monitored jobs default to five per page and clamp page requests', () => {
   assert.deepEqual(jobPage(null, null, 12), { size: 5, pages: 3, page: 1, offset: 0 });
