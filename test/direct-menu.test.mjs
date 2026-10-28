@@ -30,6 +30,8 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
       { uuid: '22222222-2222-4222-8222-222222222222', first: 'Alex', last: 'Admin', active: 1,
         security_role_uuid: '66666666-6666-4666-8666-666666666666' },
       { uuid: '77777777-7777-4777-8777-777777777777', first: 'Michael', last: 'Example', active: 1 },
+      { uuid: '3c6c0cb6-a639-481d-aa1c-24121e810e7b', first: 'Named', last: 'Developer', active: 1,
+        security_role_uuid: '99999999-9999-4999-8999-999999999999' },
     ] };
     if (String(url).includes('/securityrole/')) return { ok: true, json: async () => ({ active: 1, name: roleName }) };
     return originalFetch(url, options);
@@ -136,12 +138,26 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     roleName = 'Developer';
     const developerView = await fetch(`${base}/view`, { method: 'POST', body: new URLSearchParams({ session }) });
     assert.match(await developerView.text(), /Recent checker activity/);
+    roleName = 'Default Business Owner Role';
+    const ownerView = await fetch(`${base}/view`, { method: 'POST', body: new URLSearchParams({ session }) });
+    assert.match(await ownerView.text(), /Recent checker activity/);
     roleName = 'Staff';
     const queriesBeforeStaffView = activityQueries;
     const staffView = await fetch(`${base}/view`, { method: 'POST', body: new URLSearchParams({ session }) });
     const staffHtml = await staffView.text();
     assert.doesNotMatch(staffHtml, /Recent checker activity|Michael Example|Stopped monitoring/);
     assert.equal(activityQueries, queriesBeforeStaffView);
+    roleName = 'Marketing manager ';
+    const customRoleView = await fetch(`${base}/view`, { method: 'POST', body: new URLSearchParams({ session }) });
+    assert.doesNotMatch(await customRoleView.text(), /Recent checker activity/);
+    const allowedSession = await new SignJWT({ accountUUID: process.env.SERVICEM8_ALLOWED_ACCOUNT_UUID,
+      staffUUID: '3c6c0cb6-a639-481d-aa1c-24121e810e7b' })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' }).setIssuer('rg-bc-checker-addon')
+      .setAudience('bc-checker-staff').setJti(randomUUID()).setIssuedAt().setExpirationTime('5m')
+      .sign(new TextEncoder().encode(process.env.SESSION_SECRET));
+    const allowedView = await fetch(`${base}/view`, { method: 'POST',
+      body: new URLSearchParams({ session: allowedSession }) });
+    assert.match(await allowedView.text(), /Recent checker activity/);
     for (const [kind, heading] of [['success', 'Jobs added'], ['partial', 'Some jobs could not be added'], ['error', 'Jobs not added']]) {
       const resultView = await fetch(`${base}/view`, { method: 'POST',
         body: new URLSearchParams({ session, addResult: '1 job added.', addKind: kind }),
