@@ -109,6 +109,11 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
       const response = await fetch(`${base}${path}`, { method: 'POST',
         body: new URLSearchParams({ session, csrf }) });
       assert.equal(response.status, 200);
+      if (path.endsWith('/stop')) {
+        const html = await response.text();
+        assert.match(html, /id="stopJobResult" class="job-dialog success"/);
+        assert.match(html, /Job removed from monitoring\./);
+      }
     }
     assert.deepEqual(audits.map(params => params[4]), ['job_added',
       'job_add_attempt', 'job_add_attempt', 'job_add_attempt',
