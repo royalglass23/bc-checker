@@ -4,7 +4,7 @@ Separate ServiceM8 Web Service Hosted Add-on for an Auckland-first, staff-manage
 
 ## First-version behaviour
 
-- Add up to 50 ServiceM8 job numbers at a time, separated by commas. Spaces around each number are ignored; pasted line-separated lists also work. The form includes an example; CSV and XLSX uploads are not supported. A signed-in ServiceM8 staff member adds and reviews jobs.
+- Add up to 50 ServiceM8 job numbers at a time, separated by commas. Spaces around each number are ignored; pasted line-separated lists also work. The form includes an example; CSV and XLSX uploads are not supported. A signed-in ServiceM8 staff member adds and reviews jobs. Jobs missing a client name or address are skipped, and the add notification identifies each skipped job and its missing details.
 - On the first check, record all consent events already present at the exact matched address as a **baseline**. Do not raise a new-candidate flag for those events.
 - On later checks, identify consents by number (or a fallback event fingerprint when no number exists). A new event is marked **Needs review** once. An existing baseline application also moves to review when its status first appears as issued, approved, or granted.
 - **Wrong BC** remembers the dismissal for that Job and consent number. Further observations of that number do not reopen it. **Right BC — stop checking** retains the decision and stops monitoring the Job. Staff may also stop a Job without confirming a BC.

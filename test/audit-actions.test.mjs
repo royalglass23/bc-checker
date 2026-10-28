@@ -29,14 +29,18 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
     .sign(new TextEncoder().encode(process.env.SESSION_SECRET));
   const csrf = createHash('sha256').update(`${jti}:${process.env.SESSION_SECRET}`).digest('hex');
   const audits = [];
+  let inserts = 0;
   const originalQuery = pg.Pool.prototype.query;
   const originalConnect = pg.Pool.prototype.connect;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
     if (String(url).startsWith('https://api.servicem8.com/api_1.0/job.json')) {
-      return { ok: true, json: async () => [{ uuid: jobUUID, generated_job_id: 'R124',
-        job_address: '1 Example Street', company_uuid: '' }] };
+      const number = decodeURIComponent(String(url)).match(/generated_job_id eq '([^']+)'/)?.[1];
+      return { ok: true, json: async () => [{ uuid: jobUUID, generated_job_id: number,
+        job_address: ['R126', 'R127'].includes(number) ? ' ' : '1 Example Street',
+        company_uuid: ['R125', 'R127'].includes(number) ? '' : '66666666-6666-4666-8666-666666666666' }] };
     }
+    if (String(url).includes('/company/')) return { ok: true, json: async () => ({ name: 'Example Client' }) };
     return originalFetch(url, options);
   };
   pg.Pool.prototype.query = async function (sql, params) {
@@ -58,7 +62,7 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
         expires_at: new Date(Date.now() + 3600_000),
         access_token_ciphertext: seal('token', Buffer.alloc(32)),
       }] };
-      if (sql.includes('INSERT INTO monitored_jobs')) return { rowCount: 1, rows: [{ id: jobId }] };
+      if (sql.includes('INSERT INTO monitored_jobs')) { inserts++; return { rowCount: 1, rows: [{ id: jobId }] }; }
       if (sql.includes('DELETE FROM consent_candidates')) return { rowCount: 0 };
       if (sql.includes("UPDATE monitored_jobs SET status='stopped'")) return { rows: [{ job_uuid: jobUUID, job_number: 'R123' }] };
       if (sql.includes('SELECT c.id, c.monitored_job_id')) return { rows: [{ id: candidateId,
@@ -75,12 +79,24 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
     const add = await fetch(`${base}/jobs`, { method: 'POST',
       body: new URLSearchParams({ session, csrf, jobNumbers: 'R124' }) });
     assert.equal(add.status, 200);
+    const incomplete = await fetch(`${base}/jobs`, { method: 'POST',
+      body: new URLSearchParams({ session, csrf, jobNumbers: 'R125, R126, R127' }) });
+    assert.equal(incomplete.status, 200);
+    const incompleteHtml = await incomplete.text();
+    assert.match(incompleteHtml, /Jobs not added/);
+    assert.match(incompleteHtml, /R125 \(client name\)/);
+    assert.match(incompleteHtml, /R126 \(address\)/);
+    assert.match(incompleteHtml, /R127 \(client name and address\)/);
+    assert.equal(inserts, 1);
     for (const path of [`/jobs/${jobId}/stop`, `/candidates/${candidateId}/ignore`, `/jobs/${jobId}/check`]) {
       const response = await fetch(`${base}${path}`, { method: 'POST',
         body: new URLSearchParams({ session, csrf }) });
       assert.equal(response.status, 200);
     }
-    assert.deepEqual(audits.map(params => params[4]), ['job_added', 'job_stopped', 'bc_ignored', 'manual_check']);
+    assert.deepEqual(audits.map(params => params[4]), ['job_added',
+      'job_add_attempt', 'job_add_attempt', 'job_add_attempt',
+      'job_stopped', 'bc_ignored', 'manual_check']);
+    assert.deepEqual(audits.slice(1, 4).map(params => params[8]), ['Missing client name', 'Missing address', 'Missing client name and address']);
     assert.ok(audits.every(params => params[1] === accountUUID && params[5] === staffUUID));
   } finally {
     pg.Pool.prototype.query = originalQuery;
