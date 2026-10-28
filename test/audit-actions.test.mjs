@@ -36,10 +36,16 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
   globalThis.fetch = async (url, options) => {
     if (String(url).startsWith('https://api.servicem8.com/api_1.0/job.json')) {
       const number = decodeURIComponent(String(url)).match(/generated_job_id eq '([^']+)'/)?.[1];
-      return { ok: true, json: async () => [{ uuid: jobUUID, generated_job_id: number,
+      if (number === 'R128') return { ok: true, json: async () => [] };
+      if (number === 'R129') return { ok: false, status: 403 };
+      if (number === 'R130') return { ok: false, status: 429 };
+      if (number === 'R131') return { ok: false, status: 503 };
+      return { ok: true, json: async () => [{ uuid: number === 'R132' ? '' : jobUUID, generated_job_id: number,
         job_address: ['R126', 'R127'].includes(number) ? ' ' : '1 Example Street',
-        company_uuid: ['R125', 'R127'].includes(number) ? '' : '66666666-6666-4666-8666-666666666666' }] };
+        company_uuid: ['R125', 'R127'].includes(number) ? '' : number === 'R135'
+          ? '77777777-7777-4777-8777-777777777777' : '66666666-6666-4666-8666-666666666666' }] };
     }
+    if (String(url).includes('/company/77777777-7777-4777-8777-777777777777')) return { ok: false, status: 404 };
     if (String(url).includes('/company/')) return { ok: true, json: async () => ({ name: 'Example Client' }) };
     return originalFetch(url, options);
   };
@@ -88,6 +94,17 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
     assert.match(incompleteHtml, /R126 \(address\)/);
     assert.match(incompleteHtml, /R127 \(client name and address\)/);
     assert.equal(inserts, 1);
+    const failed = await fetch(`${base}/jobs`, { method: 'POST',
+      body: new URLSearchParams({ session, csrf, jobNumbers: 'R128, R129, R130, R131, R132, R135' }) });
+    assert.equal(failed.status, 200);
+    const failedHtml = await failed.text();
+    assert.match(failedHtml, /R128 \(job number not uniquely found in ServiceM8\)/);
+    assert.match(failedHtml, /R129 \(ServiceM8 access denied; reauthorise the add-on\)/);
+    assert.match(failedHtml, /R130 \(ServiceM8 rate limit reached; try again later\)/);
+    assert.match(failedHtml, /R131 \(ServiceM8 is unavailable; try again later\)/);
+    assert.match(failedHtml, /R132 \(ServiceM8 returned an incomplete job\)/);
+    assert.match(failedHtml, /R135 \(linked client not found in ServiceM8\)/);
+    assert.equal(inserts, 1);
     for (const path of [`/jobs/${jobId}/stop`, `/candidates/${candidateId}/ignore`, `/jobs/${jobId}/check`]) {
       const response = await fetch(`${base}${path}`, { method: 'POST',
         body: new URLSearchParams({ session, csrf }) });
@@ -95,6 +112,7 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
     }
     assert.deepEqual(audits.map(params => params[4]), ['job_added',
       'job_add_attempt', 'job_add_attempt', 'job_add_attempt',
+      'job_add_attempt', 'job_add_attempt', 'job_add_attempt', 'job_add_attempt', 'job_add_attempt', 'job_add_attempt',
       'job_stopped', 'bc_ignored', 'manual_check']);
     assert.deepEqual(audits.slice(1, 4).map(params => params[8]), ['Missing client name', 'Missing address', 'Missing client name and address']);
     assert.ok(audits.every(params => params[1] === accountUUID && params[5] === staffUUID));

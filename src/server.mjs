@@ -245,6 +245,22 @@ async function dashboard(req, res, params, message, addResult = null, checkResul
   });
 }
 
+function addFailureReason(error, step) {
+  const message = error instanceof Error ? error.message : '';
+  if (/^Job .+ was not uniquely found$/.test(message)) return 'job number not uniquely found in ServiceM8';
+  if (message === 'ServiceM8 returned 404') return step === 'lookup_client'
+    ? 'linked client not found in ServiceM8' : 'job number not found in ServiceM8';
+  if (message === 'ServiceM8 returned 401' || message === 'ServiceM8 returned 403') {
+    return 'ServiceM8 access denied; reauthorise the add-on';
+  }
+  if (message === 'ServiceM8 returned 429') return 'ServiceM8 rate limit reached; try again later';
+  if (/^ServiceM8 returned 5\d\d$/.test(message)) return 'ServiceM8 is unavailable; try again later';
+  if (/^ServiceM8 returned 4\d\d$/.test(message)) return 'ServiceM8 rejected the request; contact support';
+  if (message === 'Job has no usable ID') return 'ServiceM8 returned an incomplete job';
+  if (error instanceof Error && error.name === 'TimeoutError') return 'ServiceM8 request timed out; try again later';
+  return 'BC Checker could not add this job; contact support';
+}
+
 async function addJobs(req, res) {
   const params = new URLSearchParams(await bodyText(req, 25_000));
   const identity = await staff(req, res, params);
@@ -259,11 +275,13 @@ async function addJobs(req, res) {
     let added = 0;
     const alreadyMonitored = [];
     const missingDetails = [];
-    const failures = [];
+    const failures = new Map();
     for (const number of numbers) {
+      let step = 'lookup_job';
       try {
         const job = await getJobByNumber(token, number);
         if (!uuid.test(job.uuid)) throw new Error('Job has no usable ID');
+        step = 'lookup_client';
         const clientName = await getClientName(token, job.company_uuid);
         const missing = [
           !clientName && 'client name',
@@ -276,6 +294,7 @@ async function addJobs(req, res) {
             staffName: actorName, outcome: 'skipped', detail: `Missing ${missing.join(' and ')}` });
           continue;
         }
+        step = 'save';
         const client = await db.connect();
         let addedNow = false;
         try {
@@ -308,16 +327,17 @@ async function addJobs(req, res) {
         if (addedNow) added++;
         else alreadyMonitored.push(number);
       } catch (error) {
+        const reason = addFailureReason(error, step);
         await recordAudit(db, { accountUUID: identity.accountUUID, jobNumber: number,
           type: 'job_add_attempt', staffUUID: identity.staffUUID, staffName: actorName,
-          outcome: 'failed', detail: 'Job could not be added' });
-        failures.push(number);
+          outcome: 'failed', detail: reason });
+        failures.set(reason, [...(failures.get(reason) ?? []), number]);
         console.error('BC Checker job could not be added', { number,
           error: error instanceof Error ? error.message : 'Unknown error' });
       }
     }
-    kind = added ? (alreadyMonitored.length || missingDetails.length || failures.length ? 'partial' : 'success') : 'error';
-    message = `${added} of ${numbers.length} job${numbers.length === 1 ? '' : 's'} added.${missingDetails.length ? ` Not added, missing details: ${missingDetails.join(', ')}.` : ''}${alreadyMonitored.length ? ` Already monitored: ${alreadyMonitored.join(', ').slice(0, 120)}.` : ''}${failures.length ? ` Could not add: ${failures.join(', ').slice(0, 120)}.` : ''}`;
+    kind = added ? (alreadyMonitored.length || missingDetails.length || failures.size ? 'partial' : 'success') : 'error';
+    message = `${added} of ${numbers.length} job${numbers.length === 1 ? '' : 's'} added.${missingDetails.length ? ` Not added, missing details: ${missingDetails.join(', ')}.` : ''}${alreadyMonitored.length ? ` Already monitored: ${alreadyMonitored.join(', ').slice(0, 120)}.` : ''}${failures.size ? ` Could not add: ${[...failures].map(([reason, jobNumbers]) => `${jobNumbers.join(', ')} (${reason})`).join('; ')}.` : ''}`;
   } catch (error) {
     kind = 'error';
     message = error.message === 'Enter 1–50 valid job numbers separated by commas'
