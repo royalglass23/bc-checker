@@ -105,7 +105,7 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
     assert.match(failedHtml, /R132 \(ServiceM8 returned an incomplete job\)/);
     assert.match(failedHtml, /R135 \(linked client not found in ServiceM8\)/);
     assert.equal(inserts, 1);
-    for (const path of [`/jobs/${jobId}/stop`, `/candidates/${candidateId}/ignore`, `/jobs/${jobId}/check`]) {
+    for (const path of [`/jobs/${jobId}/stop`, `/candidates/${candidateId}/ignore`, `/candidates/${candidateId}/delete`, `/jobs/${jobId}/check`]) {
       const response = await fetch(`${base}${path}`, { method: 'POST',
         body: new URLSearchParams({ session, csrf }) });
       assert.equal(response.status, 200);
@@ -113,7 +113,7 @@ test('add, stop, BC decision and manual check audit the signed staff member', as
     assert.deepEqual(audits.map(params => params[4]), ['job_added',
       'job_add_attempt', 'job_add_attempt', 'job_add_attempt',
       'job_add_attempt', 'job_add_attempt', 'job_add_attempt', 'job_add_attempt', 'job_add_attempt', 'job_add_attempt',
-      'job_stopped', 'bc_ignored', 'manual_check']);
+      'job_stopped', 'bc_ignored', 'bc_deleted', 'manual_check']);
     assert.deepEqual(audits.slice(1, 4).map(params => params[8]), ['Missing client name', 'Missing address', 'Missing client name and address']);
     assert.ok(audits.every(params => params[1] === accountUUID && params[5] === staffUUID));
   } finally {

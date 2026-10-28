@@ -101,6 +101,9 @@ test('signed Add-ons menu event renders BC Checker directly in ServiceM8', async
     assert.match(html, /id="jobSearch"/);
     assert.match(html, /Consent candidates for Job R123/);
     assert.match(html, /BC123/);
+    assert.match(html, /class="candidate-trigger" data-candidate-dialog="candidate-55555555-5555-4555-8555-555555555555"/);
+    assert.match(html, /<dialog id="candidate-55555555-5555-4555-8555-555555555555" class="candidate-dialog"/);
+    assert.match(html, /\/candidates\/55555555-5555-4555-8555-555555555555\/delete"/);
     assert.match(html, /Recent checker activity/);
     assert.match(html, /<details><summary><span>Recent checker activity<\/span><\/summary>/);
     assert.match(html, /Stopped monitoring/);

@@ -57,6 +57,19 @@ window.addEventListener('pageshow', event => {
   if (!resultDialog?.open && !checkResultDialog?.open) document.body.classList.remove('modal-active');
 });
 
+for (const trigger of document.querySelectorAll('.candidate-trigger')) {
+  const dialog = document.getElementById(trigger.dataset.candidateDialog);
+  if (!dialog) continue;
+  const open = () => { if (!dialog.open) dialog.showModal(); };
+  trigger.addEventListener('mouseenter', open);
+  trigger.addEventListener('click', open);
+  dialog.querySelector('.candidate-close')?.addEventListener('click', () => dialog.close());
+  dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
+  dialog.querySelector('form[action$="/delete"]')?.addEventListener('submit', event => {
+    if (!window.confirm('Delete this consent candidate? It will stay hidden on future checks.')) event.preventDefault();
+  });
+}
+
 const searchForm = document.querySelector('#jobSearchForm');
 const searchInput = document.querySelector('#jobSearch');
 let searchTimer;

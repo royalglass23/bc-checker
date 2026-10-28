@@ -75,7 +75,7 @@ export function latestConsentEvents(events) {
 }
 
 export function classifyEvent(event, existing, isFirstCheck) {
-  if (existing?.decision === 'ignored' || existing?.decision === 'confirmed') return existing.decision;
+  if (['ignored', 'confirmed', 'deleted'].includes(existing?.decision)) return existing.decision;
   if (existing?.decision === 'needs_review') return 'needs_review';
   if (isFirstCheck) return 'baseline';
   if (existing?.decision === 'baseline') {

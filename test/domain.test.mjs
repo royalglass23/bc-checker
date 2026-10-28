@@ -32,6 +32,7 @@ test('baseline and ignored consents never reappear as new on routine checks', ()
   const event = { number: 'BC123', date: '2026-10-20', action: 'issued', description: 'Pool fence' };
   assert.equal(classifyEvent(event, null, true), 'baseline');
   assert.equal(classifyEvent(event, { decision: 'ignored', was_issued: false }, false), 'ignored');
+  assert.equal(classifyEvent(event, { decision: 'deleted', was_issued: false }, false), 'deleted');
   assert.equal(classifyEvent(event, { decision: 'baseline', was_issued: true }, false), 'baseline');
   assert.equal(consentIdentity(event), consentIdentity({ ...event, action: 'updated' }));
 });

@@ -113,9 +113,20 @@ button:focus-visible, a:focus-visible, summary:focus-visible, select:focus-visib
 .meta { font-size: .85rem; }
 .error { color: var(--critical); }
 ul { list-style: none; padding: 0; }
-.candidate { border-top: 1px solid var(--border); padding: 14px 0; }
-.candidate p { margin: 6px 0; }
-.candidate a { color: var(--brand); }
+.candidate { border-top: 1px solid var(--border); }
+.candidate-trigger { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 8px 2px; margin: 0; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.candidate-trigger:hover { background: var(--surface-subtle); }
+.candidate-trigger strong, .candidate-trigger .pill { flex: none; }
+.candidate-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.candidate-hint { margin-left: auto; flex: none; color: var(--brand); font-size: .85rem; }
+.candidate-dialog { width: min(600px, calc(100vw - 32px)); max-height: min(80vh, 720px); padding: 22px; border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: var(--shadow); color: var(--text); }
+.candidate-dialog::backdrop { background: rgb(16 43 58 / 35%); }
+.candidate-dialog-heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; }
+.candidate-dialog h4 { margin: 0; font-size: 1.15rem; }
+.candidate-dialog p { margin: 12px 0; overflow-wrap: anywhere; }
+.candidate-dialog .candidate-description { padding: 12px; background: var(--surface-subtle); }
+.candidate-dialog a { color: var(--brand); }
+.candidate-close { margin: 0; padding: 2px 10px; background: var(--surface-subtle); color: var(--text); font-size: 1.4rem; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .actions form { display: inline; }
 .actions button { margin-top: 8px; }
@@ -142,6 +153,7 @@ summary { cursor: pointer; color: var(--text-secondary); }
   .top-panels { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
+  .candidate-hint { display: none; }
   main { padding: 20px 16px 60px; }
   .top-panels { gap: 16px; margin-bottom: 24px; }
   header { padding: 24px; }
