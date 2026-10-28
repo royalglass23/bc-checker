@@ -14,7 +14,7 @@ addForm?.addEventListener('submit', event => {
   addingJobs = true;
   submit.disabled = true;
   submit.textContent = 'Adding…';
-  if (addStatus) addStatus.textContent = 'Adding job. This may take a moment.';
+  if (addStatus) addStatus.textContent = 'Adding jobs. This may take a moment.';
   loadingDialog?.showModal();
   document.body.classList.add('modal-active');
 });
@@ -51,7 +51,7 @@ window.addEventListener('pageshow', event => {
   for (const button of document.querySelectorAll('.check-job-form button[type="submit"]')) button.disabled = false;
   if (submit) {
     submit.disabled = false;
-    submit.textContent = 'Add Job';
+    submit.textContent = 'Add Jobs';
   }
   if (addStatus) addStatus.textContent = '';
   if (!resultDialog?.open && !checkResultDialog?.open) document.body.classList.remove('modal-active');

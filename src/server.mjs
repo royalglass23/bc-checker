@@ -1,14 +1,15 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import { finishAudit, recordAudit } from './audit.mjs';
 import { mergeBcStatus } from './bc-note.mjs';
 import manifest from '../public/manifest.json' with { type: 'json' };
 import { SignJWT, jwtVerify } from 'jose';
 import { config } from './config.mjs';
 import { database } from './db.mjs';
 import { checkOne, runDueChecks } from './checker.mjs';
-import { jobPage } from './domain.mjs';
+import { jobPage, parseJobNumbers } from './domain.mjs';
 import { accessToken, addDiaryItem, consumeOAuthState, createOAuthState, exchangeCode,
-  getClientName, getJobByNumber, oauthAuthorizeUrl, saveConnection, updateJobNoteField, vendorUUID } from './servicem8.mjs';
+  getClientName, getJobByNumber, getStaffName, oauthAuthorizeUrl, saveConnection, updateJobNoteField, vendorUUID } from './servicem8.mjs';
 
 let cfg;
 let db;
@@ -72,6 +73,19 @@ async function staff(req, res, params) {
 
 function csrfFor(identity) {
   return createHash('sha256').update(`${identity.jti}:${cfg.sessionSecret}`).digest('hex');
+}
+
+async function auditStaffName(identity, token = null) {
+  try {
+    const connection = await db.query('SELECT scope FROM oauth_connections WHERE account_uuid=$1', [identity.accountUUID]);
+    if (!String(connection.rows[0]?.scope ?? '').split(/\s+/).includes('read_staff')) return '';
+    return await getStaffName(token ?? await accessToken(cfg, identity.accountUUID), identity.staffUUID);
+  } catch (error) {
+    console.warn('BC Checker could not resolve audit staff name', {
+      staffUUID: identity.staffUUID, error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    return '';
+  }
 }
 
 function checkForm(params, identity) {
@@ -153,6 +167,14 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     WHERE j.account_uuid=$1 AND j.status='active' AND j.id=ANY($2::uuid[])
     ORDER BY c.first_seen_at DESC`, [identity.accountUUID, jobs.rows.map(job => job.id)]);
   const byJob = Map.groupBy(candidates.rows, row => row.monitored_job_id);
+  const audit = await db.query(`SELECT event_type, job_number, staff_uuid, staff_name, outcome, detail, created_at
+    FROM checker_audit_events WHERE account_uuid=$1 ORDER BY created_at DESC, id DESC LIMIT 50`,
+  [identity.accountUUID]);
+  const auditLabels = {
+    job_added: 'Job added', job_add_attempt: 'Add job', job_stopped: 'Stopped monitoring',
+    manual_check: 'Check now', scheduled_check: 'Scheduled check', bc_ignored: 'Wrong BC',
+    bc_confirmed: 'Right BC; stopped monitoring', bc_reopened: 'Reopened BC',
+  };
   const csrf = csrfFor(identity);
   const jobViews = jobs.rows.map(job => {
     const rows = byJob.get(job.id) ?? [];
@@ -183,7 +205,7 @@ async function renderDashboard(identity, session, query, message, embedded = fal
   const flash = message ?? query.get('message');
   const result = addResult ?? (query.has('addResult') ? {
     message: String(query.get('addResult')).slice(0, 300),
-    kind: query.get('addKind') === 'success' ? 'success' : 'error',
+    kind: ['success', 'partial'].includes(query.get('addKind')) ? query.get('addKind') : 'error',
   } : null);
   const checked = checkResult ?? (query.has('checkResult') ? {
     message: String(query.get('checkResult')).slice(0, 300),
@@ -194,20 +216,23 @@ async function renderDashboard(identity, session, query, message, embedded = fal
     : `<a href="/?page=${number}&amp;size=${pageSize}&amp;search=${encodeURIComponent(term)}" rel="${rel}">${label}</a>`;
   return page('Monitored jobs', `<div class="top-panels"><header><p class="eyebrow">Royal Glass · ServiceM8 add-on</p><h1>BC Checker</h1>
     <p>Track Auckland jobs every 14 days. Existing consents form a baseline; only newly seen candidates need review.</p>${session ? '<p>Use the surrounding ServiceM8 navigation to leave BC Checker.</p>' : ''}</header>
-    <section class="add"><h2>Add a job to monitor</h2><p>Enter a ServiceM8 job number to start monitoring it.</p>
+    <section class="add"><h2>Add jobs to monitor</h2><p>Separate ServiceM8 job numbers with commas. Spaces before or after a number are ignored. Add up to 50 jobs at once.</p>
     <form method="post" action="${escape(origin)}/jobs"><input type="hidden" name="csrf" value="${csrf}">${hiddenSession(session)}
-    <label for="jobNumber">Job number</label><input id="jobNumber" name="jobNumber" type="text" maxlength="30" pattern="[A-Za-z0-9-]{1,30}" placeholder="e.g. R123" autocomplete="off" required>
-    <button id="addJobsButton" type="submit">Add Job</button><span id="addJobsStatus" class="submit-status" role="status" aria-live="polite"></span></form></section></div>
-    <dialog id="addJobsLoading" class="job-dialog" aria-labelledby="addJobsLoadingTitle" aria-describedby="addJobsLoadingText"><div class="dialog-content"><span class="spinner" aria-hidden="true"></span><div><h2 id="addJobsLoadingTitle">Adding job</h2><p id="addJobsLoadingText">Please wait while the job is added to monitoring.</p></div></div></dialog>
+    <label for="jobNumbers">Job numbers</label><textarea id="jobNumbers" name="jobNumbers" rows="4" maxlength="2000" aria-describedby="jobNumbersHelp" required></textarea>
+    <p id="jobNumbersHelp" class="hint">Example:</p><pre class="job-example">R123, R124, R125</pre>
+    <button id="addJobsButton" type="submit">Add Jobs</button><span id="addJobsStatus" class="submit-status" role="status" aria-live="polite"></span></form></section></div>
+    <dialog id="addJobsLoading" class="job-dialog" aria-labelledby="addJobsLoadingTitle" aria-describedby="addJobsLoadingText"><div class="dialog-content"><span class="spinner" aria-hidden="true"></span><div><h2 id="addJobsLoadingTitle">Adding jobs</h2><p id="addJobsLoadingText">Please wait while the jobs are added to monitoring.</p></div></div></dialog>
     <dialog id="checkJobLoading" class="job-dialog" aria-labelledby="checkJobLoadingTitle" aria-describedby="checkJobLoadingText"><div class="dialog-content"><span class="spinner" aria-hidden="true"></span><div><h2 id="checkJobLoadingTitle">Checking job</h2><p id="checkJobLoadingText">Please wait while the address is checked.</p></div></div></dialog>
-    ${result ? `<dialog id="addJobsResult" class="job-dialog ${result.kind}" aria-labelledby="addJobsResultTitle" aria-describedby="addJobsResultText"><h2 id="addJobsResultTitle">${result.kind === 'success' ? 'Job added' : 'Job not added'}</h2><p id="addJobsResultText">${escape(result.message)}</p><form method="dialog"><button id="closeAddJobsResult" type="submit">OK</button></form></dialog>` : ''}
+    ${result ? `<dialog id="addJobsResult" class="job-dialog ${result.kind}" aria-labelledby="addJobsResultTitle" aria-describedby="addJobsResultText"><h2 id="addJobsResultTitle">${result.kind === 'success' ? 'Jobs added' : result.kind === 'partial' ? 'Some jobs could not be added' : 'Jobs not added'}</h2><p id="addJobsResultText">${escape(result.message)}</p><form method="dialog"><button id="closeAddJobsResult" type="submit">OK</button></form></dialog>` : ''}
     ${checked ? `<dialog id="checkJobResult" class="job-dialog ${checked.kind}" aria-labelledby="checkJobResultTitle" aria-describedby="checkJobResultText"><h2 id="checkJobResultTitle">${checked.kind === 'success' ? 'Job checked' : 'Job check not completed'}</h2><p id="checkJobResultText">${escape(checked.message)}</p><form method="dialog"><button id="closeCheckJobResult" type="submit">OK</button></form></dialog>` : ''}
     ${flash && !result && !checked ? `<p class="flash" role="status">${escape(flash.slice(0, 300))}</p>` : ''}
     <section aria-label="Monitored jobs" class="monitored"><div class="list-heading"><div><h2>Monitored jobs</h2><p class="hint">${term ? `${total} matching` : `${total} active`} ${total === 1 ? 'job' : 'jobs'}</p></div>
     <form id="jobSearchForm" class="job-search" method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}">${hiddenSession(session)}<input type="hidden" name="size" value="${pageSize}"><label for="jobSearch">Search jobs</label><input id="jobSearch" name="search" type="search" minlength="3" maxlength="100" value="${escape(search)}" placeholder="Job number, address or client" autocomplete="off"${term ? ' autofocus' : ''}><button type="submit">Search</button>${term ? '<button id="clearSearch" type="button">Clear</button>' : ''}</form></div>
     ${jobViews.length ? `<div class="table-scroll"><table class="jobs-table"><thead><tr><th scope="col">Job number</th><th scope="col">Client</th><th scope="col">Address</th><th scope="col">Last checked</th><th scope="col">Status</th><th scope="col">Check</th><th scope="col">Stop</th></tr></thead><tbody>${jobViews.map(view => view.row).join('')}</tbody></table></div>${jobViews.map(view => view.candidates).join('')}` : `<p class="empty">${term ? `No monitored jobs match “${escape(term)}”.` : 'No jobs are being monitored. Add a job number to start.'}</p>`}
     ${total ? `<nav class="pagination" aria-label="Monitored jobs pages"><span>Showing ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, total)} of ${total} · Page ${currentPage} of ${pageCount}</span><div>${currentPage > 1 ? pageControl(currentPage - 1, 'Previous', 'prev') : ''}${currentPage < pageCount ? pageControl(currentPage + 1, 'Next', 'next') : ''}</div>
-    <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<input type="hidden" name="search" value="${escape(term)}"><label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>`, true, embedded);
+    <form method="${session ? 'post' : 'get'}" action="${escape(origin)}${session ? '/view' : '/'}" class="page-size">${hiddenSession(session)}<input type="hidden" name="search" value="${escape(term)}"><label for="pageSize">Jobs per page</label><select id="pageSize" name="size">${[5, 10, 20, 50].map(size => `<option value="${size}"${size === pageSize ? ' selected' : ''}>${size}</option>`).join('')}</select><button type="submit">Apply</button></form></nav>` : ''}</section>
+    <section class="audit-panel" aria-label="Recent checker activity"><h2>Recent checker activity</h2><p class="hint">The latest 50 actions for this ServiceM8 account.</p>
+    ${audit.rows.length ? `<div class="table-scroll"><table class="audit-table"><thead><tr><th scope="col">When</th><th scope="col">Job</th><th scope="col">Event</th><th scope="col">By</th><th scope="col">Result</th></tr></thead><tbody>${audit.rows.map(row => `<tr><td>${escape(new Date(row.created_at).toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' }))}</td><td>${escape(row.job_number || '—')}</td><td>${escape(auditLabels[row.event_type] ?? row.event_type)}${row.detail ? `<span class="audit-detail">${escape(row.detail)}</span>` : ''}</td><td>${escape(row.staff_name || (row.staff_uuid ? `Staff ${row.staff_uuid}` : 'BC Checker scheduler'))}</td><td>${escape(row.outcome)}</td></tr>`).join('')}</tbody></table></div>` : '<p class="empty">No checker activity has been recorded yet.</p>'}</section>`, true, embedded);
 }
 
 async function dashboard(req, res, params, message, addResult = null, checkResult = null) {
@@ -228,41 +253,63 @@ async function addJobs(req, res) {
   let message;
   let kind;
   try {
-    const number = String(params.get('jobNumber') ?? '').trim();
-    if (!/^[A-Za-z0-9-]{1,30}$/.test(number)) throw new Error('Enter one valid job number');
+    const numbers = parseJobNumbers(params.get('jobNumbers'));
     const token = await accessToken(cfg, identity.accountUUID);
-    const job = await getJobByNumber(token, number);
-    if (!uuid.test(job.uuid) || !job.job_address?.trim()) throw new Error('Job has no usable address');
-    const clientName = await getClientName(token, job.company_uuid);
-    const client = await db.connect();
-    try {
-      await client.query('BEGIN');
-      const result = await client.query(`INSERT INTO monitored_jobs
-        (id, account_uuid, job_uuid, job_number, job_address, client_name, job_description, added_by_staff_uuid)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (account_uuid, job_uuid) DO UPDATE SET
-        job_number=excluded.job_number, job_address=excluded.job_address,
-        client_name=excluded.client_name, job_description=excluded.job_description, status='active', baseline_complete=false,
-        last_checked_at=NULL, next_check_at=now(), last_error=NULL,
-        added_by_staff_uuid=excluded.added_by_staff_uuid,
-        stopped_by_staff_uuid=NULL, stopped_at=NULL
-        WHERE monitored_jobs.status='stopped' RETURNING id`,
-      [randomUUID(), identity.accountUUID, job.uuid, number, job.job_address, clientName,
-        String(job.job_description ?? '').slice(0, 2000), identity.staffUUID]);
-      if (result.rowCount) {
-        await client.query('DELETE FROM consent_candidates WHERE monitored_job_id=$1', [result.rows[0].id]);
-        kind = 'success';
-        message = `Job ${number} added to monitoring.`;
-      } else {
-        kind = 'error';
-        message = `Job ${number} is already monitored.`;
+    const actorName = await auditStaffName(identity, token);
+    let added = 0;
+    const alreadyMonitored = [];
+    const failures = [];
+    for (const number of numbers) {
+      try {
+        const job = await getJobByNumber(token, number);
+        if (!uuid.test(job.uuid) || !job.job_address?.trim()) throw new Error('Job has no usable address');
+        const clientName = await getClientName(token, job.company_uuid);
+        const client = await db.connect();
+        let addedNow = false;
+        try {
+          await client.query('BEGIN');
+          const result = await client.query(`INSERT INTO monitored_jobs
+            (id, account_uuid, job_uuid, job_number, job_address, client_name, job_description, added_by_staff_uuid)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT (account_uuid, job_uuid) DO UPDATE SET
+            job_number=excluded.job_number, job_address=excluded.job_address,
+            client_name=excluded.client_name, job_description=excluded.job_description, status='active', baseline_complete=false,
+            last_checked_at=NULL, next_check_at=now(), last_error=NULL,
+            added_by_staff_uuid=excluded.added_by_staff_uuid,
+            stopped_by_staff_uuid=NULL, stopped_at=NULL
+            WHERE monitored_jobs.status='stopped' RETURNING id`,
+          [randomUUID(), identity.accountUUID, job.uuid, number, job.job_address, clientName,
+            String(job.job_description ?? '').slice(0, 2000), identity.staffUUID]);
+          if (result.rowCount) {
+            await client.query('DELETE FROM consent_candidates WHERE monitored_job_id=$1', [result.rows[0].id]);
+            await recordAudit(client, { accountUUID: identity.accountUUID, jobUUID: job.uuid,
+              jobNumber: number, type: 'job_added', staffUUID: identity.staffUUID,
+              staffName: actorName, outcome: 'success' });
+            addedNow = true;
+          } else {
+            await recordAudit(client, { accountUUID: identity.accountUUID, jobUUID: job.uuid,
+              jobNumber: number, type: 'job_add_attempt', staffUUID: identity.staffUUID,
+              staffName: actorName, outcome: 'skipped', detail: 'Already monitored' });
+          }
+          await client.query('COMMIT');
+        } catch (error) { await client.query('ROLLBACK'); throw error; }
+        finally { client.release(); }
+        if (addedNow) added++;
+        else alreadyMonitored.push(number);
+      } catch (error) {
+        await recordAudit(db, { accountUUID: identity.accountUUID, jobNumber: number,
+          type: 'job_add_attempt', staffUUID: identity.staffUUID, staffName: actorName,
+          outcome: 'failed', detail: 'Job could not be added' });
+        failures.push(number);
+        console.error('BC Checker job could not be added', { number,
+          error: error instanceof Error ? error.message : 'Unknown error' });
       }
-      await client.query('COMMIT');
-    } catch (error) { await client.query('ROLLBACK'); throw error; }
-    finally { client.release(); }
+    }
+    kind = added ? (alreadyMonitored.length || failures.length ? 'partial' : 'success') : 'error';
+    message = `${added} of ${numbers.length} job${numbers.length === 1 ? '' : 's'} added.${alreadyMonitored.length ? ` Already monitored: ${alreadyMonitored.join(', ').slice(0, 120)}.` : ''}${failures.length ? ` Could not add: ${failures.join(', ').slice(0, 120)}.` : ''}`;
   } catch (error) {
     kind = 'error';
-    message = error.message === 'Enter one valid job number'
-      ? error.message : 'Could not add the job. Check the job number and try again.';
+    message = error.message === 'Enter 1–50 valid job numbers separated by commas'
+      ? error.message : 'Could not add the jobs. Please try again.';
     console.error('BC Checker add jobs failed', { error: error instanceof Error ? error.message : 'Unknown error' });
   }
   if (params.has('session')) return dashboard(req, res, params, null, { message, kind });
@@ -274,10 +321,11 @@ async function decision(req, res, candidateId, value) {
   const identity = await staff(req, res, params);
   if (!identity) return;
   checkForm(params, identity);
+  const actorName = await auditStaffName(identity);
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    const candidate = await client.query(`SELECT c.id, c.monitored_job_id FROM consent_candidates c
+    const candidate = await client.query(`SELECT c.id, c.monitored_job_id, c.consent_number, j.job_uuid, j.job_number FROM consent_candidates c
       JOIN monitored_jobs j ON j.id=c.monitored_job_id WHERE c.id=$1 AND j.account_uuid=$2 AND j.status='active' FOR UPDATE OF c`,
     [candidateId, identity.accountUUID]);
     if (!candidate.rows[0]) throw new Error('Candidate is no longer active');
@@ -286,6 +334,11 @@ async function decision(req, res, candidateId, value) {
     if (value === 'confirmed') await client.query(`UPDATE monitored_jobs SET status='stopped',
       stopped_by_staff_uuid=$2, stopped_at=now() WHERE id=$1 AND account_uuid=$3`,
     [candidate.rows[0].monitored_job_id, identity.staffUUID, identity.accountUUID]);
+    await recordAudit(client, { accountUUID: identity.accountUUID, jobUUID: candidate.rows[0].job_uuid,
+      jobNumber: candidate.rows[0].job_number, type: {
+        ignored: 'bc_ignored', confirmed: 'bc_confirmed', needs_review: 'bc_reopened',
+      }[value], staffUUID: identity.staffUUID, staffName: actorName, outcome: 'success',
+      detail: candidate.rows[0].consent_number ? `BC ${candidate.rows[0].consent_number}` : 'Consent candidate' });
     await client.query('COMMIT');
   } catch (error) { await client.query('ROLLBACK'); throw error; }
   finally { client.release(); }
@@ -300,11 +353,29 @@ async function stopJob(req, res, jobId) {
   const identity = await staff(req, res, params);
   if (!identity) return;
   checkForm(params, identity);
-  await db.query(`UPDATE monitored_jobs SET status='stopped', stopped_by_staff_uuid=$3,
-    stopped_at=now() WHERE id=$1 AND account_uuid=$2 AND status='active'`,
-  [jobId, identity.accountUUID, identity.staffUUID]);
-  if (params.has('session')) return dashboard(req, res, params, 'Job removed from monitoring.');
-  redirect(res, '/?message=Job%20removed%20from%20monitoring.');
+  const actorName = await auditStaffName(identity);
+  const client = await db.connect();
+  let message;
+  try {
+    await client.query('BEGIN');
+    const stopped = await client.query(`UPDATE monitored_jobs SET status='stopped', stopped_by_staff_uuid=$3,
+      stopped_at=now() WHERE id=$1 AND account_uuid=$2 AND status='active' RETURNING job_uuid, job_number`,
+    [jobId, identity.accountUUID, identity.staffUUID]);
+    if (stopped.rows[0]) {
+      await recordAudit(client, { accountUUID: identity.accountUUID, jobUUID: stopped.rows[0].job_uuid,
+        jobNumber: stopped.rows[0].job_number, type: 'job_stopped', staffUUID: identity.staffUUID,
+        staffName: actorName, outcome: 'success' });
+      message = 'Job removed from monitoring.';
+    } else message = 'Job is no longer being monitored.';
+    await client.query('COMMIT');
+  } catch (error) { await client.query('ROLLBACK'); throw error; }
+  finally { client.release(); }
+  if (params.has('session')) return dashboard(req, res, params, message);
+  redirect(res, `/?message=${encodeURIComponent(message)}`);
+}
+
+export function manualCheckDiaryContent(job, outcome, actorName, date) {
+  return `BC Checker address check — ${date}\nChecked by: ${actorName}\nJob ${job.job_number}: ${outcome.matchedAddress || job.job_address}\n${outcome.events} consent event(s) found; ${outcome.firstCheck ? 'first check baseline recorded' : `${outcome.newCandidates} new candidate(s) to review`}. Address results are candidates until staff confirm the right BC.\nSource: ${outcome.sourceUrl}`.slice(0, 1000);
 }
 
 async function checkJobNow(req, res, jobId) {
@@ -314,42 +385,53 @@ async function checkJobNow(req, res, jobId) {
   checkForm(params, identity);
   let message;
   let kind = 'success';
+  let auditId;
+  let auditOutcome = 'failed';
   try {
     const found = await db.query(`SELECT * FROM monitored_jobs WHERE id=$1 AND account_uuid=$2 AND status='active'`,
       [jobId, identity.accountUUID]);
     const job = found.rows[0];
     if (!job) throw new Error('Monitored job is no longer active');
+    const actorNameForAudit = await auditStaffName(identity);
+    auditId = await recordAudit(db, { accountUUID: identity.accountUUID, jobUUID: job.job_uuid,
+      jobNumber: job.job_number, type: 'manual_check', staffUUID: identity.staffUUID,
+      staffName: actorNameForAudit, outcome: 'started' });
     const connection = await db.query('SELECT scope FROM oauth_connections WHERE account_uuid=$1', [identity.accountUUID]);
     const granted = new Set(String(connection.rows[0]?.scope ?? '').split(/\s+/));
-    if (!granted.has('manage_jobs') || !granted.has('publish_diary_items')) {
+    if (!granted.has('manage_jobs') || !granted.has('publish_diary_items') || !granted.has('read_staff')) {
       kind = 'error';
-      message = 'Reconnect BC Checker in ServiceM8 to enable Job Note field and Diary updates.';
+      message = 'Reconnect BC Checker in ServiceM8 to enable staff attribution, Job Note field and Diary updates.';
     } else {
+      const token = await accessToken(cfg, identity.accountUUID);
+      const actorName = await getStaffName(token, identity.staffUUID);
       const lease = await db.connect();
       try {
         const lockKey = `bc-checker-manual:${jobId}`;
         const lock = await lease.query('SELECT pg_try_advisory_lock(hashtext($1)) AS acquired', [lockKey]);
         if (!lock.rows[0].acquired) {
           kind = 'error';
+          auditOutcome = 'skipped';
           message = 'This address is already being checked. Refresh shortly.';
         } else {
           try {
             const outcome = await checkOne(cfg, job);
             if (outcome.skipped) {
               kind = 'error';
+              auditOutcome = 'skipped';
               message = 'This job is no longer being monitored.';
             } else {
               const date = new Date().toLocaleString('en-NZ', { timeZone: 'Pacific/Auckland' });
-              const content = `BC Checker address check — ${date}\nJob ${job.job_number}: ${outcome.matchedAddress || job.job_address}\n${outcome.events} consent event(s) found; ${outcome.firstCheck ? 'first check baseline recorded' : `${outcome.newCandidates} new candidate(s) to review`}. Address results are candidates until staff confirm the right BC.\nSource: ${outcome.sourceUrl}`.slice(0, 1000);
+              const content = manualCheckDiaryContent(job, outcome, actorName, date);
               let noteSaved = false;
               try {
-                const token = await accessToken(cfg, identity.accountUUID);
                 await updateJobNoteField(token, job.job_uuid, current => mergeBcStatus(current, outcome.noteStatus));
                 noteSaved = true;
-                await addDiaryItem(token, job.job_uuid, content);
-                message = `Address checked. ${outcome.events} consent event(s) found. Note field updated; one Diary entry added.`;
+                await addDiaryItem(token, job.job_uuid, content, identity.staffUUID);
+                auditOutcome = 'success';
+                message = `Address checked by ${actorName}. ${outcome.events} consent event(s) found. Note field updated; one Diary entry added.`;
               } catch (error) {
                 kind = 'error';
+                auditOutcome = 'partial';
                 console.error('BC Checker ServiceM8 update failed', { jobId, noteSaved,
                   error: error instanceof Error ? error.message : 'Unknown error' });
                 message = `Address checked, but ServiceM8 ${noteSaved ? 'Diary' : 'Note field'} update failed. Do not click again until the job is reviewed.`;
@@ -373,6 +455,15 @@ async function checkJobNow(req, res, jobId) {
       ? error.message : 'Could not complete the job check. Please try again.';
     console.error('BC Checker manual check failed', { jobId,
       error: error instanceof Error ? error.message : 'Unknown error' });
+  }
+  if (auditId) {
+    try { await finishAudit(db, auditId, auditOutcome, message); }
+    catch (error) {
+      console.error('BC Checker manual check audit could not be completed', { auditId,
+        error: error instanceof Error ? error.message : 'Unknown error' });
+      kind = 'error';
+      message += ' The activity log could not be updated; review this check before retrying.';
+    }
   }
   if (params.has('session')) return dashboard(req, res, params, null, null, { message, kind });
   redirect(res, `/?checkResult=${encodeURIComponent(message)}&checkKind=${kind}`);

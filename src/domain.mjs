@@ -84,6 +84,15 @@ export function classifyEvent(event, existing, isFirstCheck) {
   return 'needs_review';
 }
 
+export function parseJobNumbers(raw) {
+  const numbers = String(raw ?? '').split(/[,\r\n]/).map(number => number.trim()).filter(Boolean);
+  if (numbers.length === 0 || numbers.length > 50 ||
+      numbers.some(number => !/^[A-Za-z0-9-]{1,30}$/.test(number))) {
+    throw new Error('Enter 1–50 valid job numbers separated by commas');
+  }
+  return [...new Set(numbers)];
+}
+
 export function jobPage(rawSize, rawPage, total) {
   const size = [5, 10, 20, 50].includes(Number(rawSize)) ? Number(rawSize) : 5;
   const pages = Math.max(1, Math.ceil(total / size));
