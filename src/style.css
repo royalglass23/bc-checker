@@ -33,7 +33,8 @@ main { max-width: 1280px; margin: 0 auto; padding: 36px 18px 80px; }
   grid-template-columns: minmax(0, .9fr) minmax(0, 1.5fr);
   gap: 24px;
   align-items: stretch;
-  margin-bottom: 32px;
+  max-width: 1000px;
+  margin: 0 auto 32px;
 }
 header, .add { min-width: 0; margin: 0; border-radius: 3px; }
 header { padding: 28px 32px; background: var(--brand-strong); color: var(--text-inverse); }
