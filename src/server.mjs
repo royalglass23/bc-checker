@@ -99,7 +99,10 @@ async function activityStaffNames(identity) {
     const viewer = staff.find(member => String(member.uuid).toLowerCase() === identity.staffUUID);
     if (!viewer || Number(viewer.active) !== 1 || !uuid.test(String(viewer.security_role_uuid))) return null;
     const role = await serviceM8Get(token, `/securityrole/${encodeURIComponent(viewer.security_role_uuid)}.json`);
-    if (Number(role.active) !== 1 || !['admin', 'administrator', 'developer'].includes(String(role.name ?? '').trim().toLowerCase())) return null;
+    const roleName = String(role.name ?? '').trim().toLowerCase();
+    const allowedRole = Number(role.active) === 1 &&
+      ['admin', 'administrator', 'developer', 'business owner', 'default business owner role'].includes(roleName);
+    if (!allowedRole && !cfg.auditViewerStaffUUIDs.has(identity.staffUUID)) return null;
     return new Map(staff.map(member => [String(member.uuid).toLowerCase(),
       `${String(member.first ?? '').trim()} ${String(member.last ?? '').trim()}`.trim().replace(/\s+/g, ' ').slice(0, 80)]));
   } catch (error) {

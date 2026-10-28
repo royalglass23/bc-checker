@@ -18,6 +18,9 @@ export function config() {
     encryptionKey: key,
     sessionSecret: process.env.SESSION_SECRET,
     cronSecret: process.env.CRON_SECRET,
+    auditViewerStaffUUIDs: new Set(['3c6c0cb6-a639-481d-aa1c-24121e810e7b',
+      ...String(process.env.AUDIT_VIEWER_STAFF_UUIDS ?? '')
+        .split(',').map(value => value.trim().toLowerCase()).filter(Boolean)]),
     port: Number(process.env.PORT || 3000),
   };
 }
